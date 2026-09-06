@@ -20,7 +20,8 @@ If you are evaluating this repository, it can look intimidating. We recommend ex
 ### Step 2: The Core Logic (Source Code)
 *   [**`tier_simulator.py`**](src/tier_simulator.py): The foundational math engine. It calculates exactly how much latency is added when an expert is fetched across the CXL bus rather than local HBM.
 *   [**`periodic_reprofile.py`**](src/periodic_reprofile.py): Our primary experiment. This script tests different algorithms (Pure Static, Pure LRU, and Periodic Re-profiling) to see which one manages the HBM/CXL boundary best.
-*   [**`calc_energy.py`**](src/calc_energy.py): The hardware physics. It converts raw memory access counts into actual nanoJoules (nJ) of energy consumed, based on our cycle-accurate DRAMSim3 simulations.
+*   [**calc_energy.py**](src/calc_energy.py): The hardware physics. It converts raw memory access counts into actual nanoJoules (nJ) of energy consumed, based on our cycle-accurate DRAMSim3 simulations.
+*   [**prefetch_simulator.py**](src/prefetch_simulator.py): Advanced machine learning. Implements a Markov Chain to predict future expert requests and prefetch them from CXL, hiding the latency penalty.
 
 ### Step 3: The Deliverables (Results)
 *   [**`four_strategy_comparison.png`**](results/four_strategy_comparison.png): A visual graph showing how our different caching strategies react to sudden context shifts in the workload.
