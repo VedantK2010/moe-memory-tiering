@@ -1,0 +1,14 @@
+# Core analysis pipeline (src/, run_all.py)
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+
+# Streamlit dashboard (dashboard/app.py)
+# The standalone dashboard/index.html needs none of this -- it runs in a
+# browser with no install at all.
+streamlit>=1.30
+plotly>=5.18
+
+# Only needed to re-download the real Mixtral routing traces
+# (src/convert_real_data.py). Run that step in Colab if you prefer.
+datasets>=2.14

@@ -27,6 +27,8 @@ way to feed DRAMSim3 a "bulk transfer."
 
 import pandas as pd
 
+import paths
+
 # --- Configuration ---
 NUM_TOKENS_TO_SAMPLE = 2000     # subsample size (out of the original 50,000)
 TRANSFER_CHUNK_BYTES = 4096     # scaled-down "page size" per expert access
@@ -70,14 +72,21 @@ def generate_burst_trace(trace_df, num_tokens, out_path):
 
 
 if __name__ == "__main__":
-    trace_df = pd.read_csv("/mnt/user-data/outputs/expert_trace.csv")
+    trace_df = pd.read_csv(paths.require_data("expert_trace.csv"))
 
-    num_lines, final_cycle = generate_burst_trace(trace_df, NUM_TOKENS_TO_SAMPLE, "dramsim3_burst_trace.txt")
+    out_path = paths.data("dramsim3_burst_trace.txt")
+    num_lines, final_cycle = generate_burst_trace(trace_df, NUM_TOKENS_TO_SAMPLE, out_path)
 
     print(f"Sampled first {NUM_TOKENS_TO_SAMPLE} tokens (of {len(trace_df)} total)")
     print(f"Transfer unit: {TRANSFER_CHUNK_BYTES} bytes per expert access "
           f"({COMMANDS_PER_ACCESS} commands of {BURST_SIZE_BYTES} bytes each)")
-    print(f"Generated {num_lines} trace lines")
+    print(f"Generated {num_lines} trace lines -> {out_path}")
     print(f"Final cycle reached: {final_cycle}")
     print(f"\nRun DRAMSim3 with:")
-    print(f"  ./build/dramsim3main configs/DDR4_8Gb_x8_3200.ini -c {final_cycle + 1000} -t dramsim3_burst_trace.txt")
+    print(f"  ./build/dramsim3main configs/HBM2_8Gb_x128.ini "
+          f"-c {final_cycle + 1000} -t {out_path}")
+    print("\nThe published validation figures (60.71 ns mean burst latency,")
+    print("88.08% row-buffer hit rate, 256,000 commands) come from an HBM2")
+    print("config, so use an HBM2 .ini rather than the DDR4 one to reproduce")
+    print("them. Confirm the burst size in that config matches BURST_SIZE_BYTES")
+    print("above before quoting per-command numbers.")

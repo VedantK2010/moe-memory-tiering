@@ -23,10 +23,14 @@ This script:
      shifts away from what the static strategy was frozen on.
 """
 
+import matplotlib
+matplotlib.use("Agg")
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import paths
 from tier_simulator import (
     access_time_ns, assign_tiers, simulate, simulate_lru_cache,
     HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS,
@@ -42,7 +46,7 @@ SEED = 7
 
 
 def generate_nonstationary_trace(num_experts, top_k, tokens_per_phase, num_phases,
-                                  p_repeat_target, seed):
+                                  p_repeat_target, seed, skew_alpha=6):
     """
     Generate a trace made of several back-to-back phases, each with its
     OWN popularity distribution. Locality (temporal repeat behavior) is
@@ -62,7 +66,7 @@ def generate_nonstationary_trace(num_experts, top_k, tokens_per_phase, num_phase
     phase_labels = []
     phase_base_probs = []
 
-    base_shape = rng.dirichlet(alpha=[6] * num_experts)
+    base_shape = rng.dirichlet(alpha=[skew_alpha] * num_experts)
     roll_amount = max(1, num_experts // num_phases)
 
     prev_first = None
@@ -181,7 +185,7 @@ if __name__ == "__main__":
     trace_df, phase_base_probs = generate_nonstationary_trace(
         NUM_EXPERTS, TOP_K, TOKENS_PER_PHASE, NUM_PHASES, P_REPEAT_TARGET, SEED
     )
-    trace_df.to_csv("nonstationary_trace.csv", index=False)
+    trace_df.to_csv(paths.data("nonstationary_trace.csv"), index=False)
 
     print("Hot-expert distribution per phase (target popularity):")
     for i, probs in enumerate(phase_base_probs):
@@ -206,9 +210,12 @@ if __name__ == "__main__":
     merged["lru_advantage_pct"] = (
         (merged["avg_time_ns_static"] - merged["avg_time_ns_lru"]) / merged["avg_time_ns_static"] * 100
     )
-    merged.to_csv("nonstationary_comparison.csv", index=False)
+    merged.to_csv(paths.result("nonstationary_comparison.csv"), index=False)
     print("\n=== LRU advantage over static, per phase ===")
     print(merged[["phase", "lru_advantage_pct"]].to_string(index=False))
 
-    plot_phase_comparison(static_results, lru_results, CAPACITY_K, "nonstationary_comparison.png")
-    print("\nWrote: nonstationary_trace.csv, nonstationary_comparison.csv, nonstationary_comparison.png")
+    plot_phase_comparison(static_results, lru_results, CAPACITY_K,
+                          paths.result("nonstationary_comparison.png"))
+    print(f"\nWrote: {paths.data('nonstationary_trace.csv')}"
+          f"\n       {paths.result('nonstationary_comparison.csv')}"
+          f"\n       {paths.result('nonstationary_comparison.png')}")

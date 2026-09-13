@@ -23,10 +23,14 @@ expert-ID order) -- this reflects a real cold-start with zero prior
 information, not a lucky guess.
 """
 
+import matplotlib
+matplotlib.use("Agg")
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import paths
 from tier_simulator import access_time_ns, assign_tiers, simulate, \
     HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES
 
@@ -135,17 +139,17 @@ if __name__ == "__main__":
     NUM_EXPERTS = 8
     CAPACITY_K = 4
 
-    nonstationary_df = pd.read_csv("nonstationary_trace.csv")
+    nonstationary_df = pd.read_csv(paths.require_data("nonstationary_trace.csv"))
 
     # --- Try several re-profiling frequencies ---
     intervals = [500, 1000, 2000, 5000, 10000, 20000]
     interval_results = compare_reprofile_intervals(nonstationary_df, CAPACITY_K, NUM_EXPERTS, intervals)
-    interval_results.to_csv("reprofile_interval_sweep.csv", index=False)
+    interval_results.to_csv(paths.result("reprofile_interval_sweep.csv"), index=False)
     print("=== Overall avg access time vs re-profiling interval ===")
     print(interval_results.to_string(index=False))
 
     # --- Load the three earlier strategies' results for a fair overall comparison ---
-    prior = pd.read_csv("hybrid_nonstationary_comparison.csv")
+    prior = pd.read_csv(paths.RESULTS_DIR / "hybrid_nonstationary_comparison.csv")
     static_overall = prior["avg_time_ns_static"].mean()
     lru_overall = prior["avg_time_ns_lru"].mean()
     hybrid_overall = prior["avg_time_ns_hybrid"].mean()
@@ -155,7 +159,7 @@ if __name__ == "__main__":
     print(f"Hybrid overall avg:      {hybrid_overall:.1f} ns")
 
     plot_interval_comparison(interval_results, static_overall, lru_overall, hybrid_overall,
-                              "reprofile_interval_sweep.png")
+                              paths.result("reprofile_interval_sweep.png"))
 
     # --- Best interval: per-phase breakdown vs the other three strategies ---
     best_interval = int(interval_results.loc[interval_results["overall_avg_time_ns"].idxmin(), "reprofile_interval"])
@@ -169,10 +173,13 @@ if __name__ == "__main__":
     hybrid_phase = prior[["phase", "avg_time_ns_hybrid"]].rename(columns={"avg_time_ns_hybrid": "avg_time_ns"})
 
     plot_phase_four_way(static_phase, lru_phase, hybrid_phase, reprofile_best,
-                         "four_strategy_comparison.png")
+                         paths.result("four_strategy_comparison.png"))
 
     reprofile_best.groupby("phase")["avg_time_ns"].mean().reset_index().to_csv(
-        "reprofile_best_by_phase.csv", index=False
+        paths.result("reprofile_best_by_phase.csv"), index=False
     )
 
-    print("\nWrote: reprofile_interval_sweep.csv/.png, four_strategy_comparison.png, reprofile_best_by_phase.csv")
+    print(f"\nWrote into {paths.RESULTS_DIR}:"
+          f"\n       reprofile_interval_sweep.csv/.png"
+          f"\n       four_strategy_comparison.png"
+          f"\n       reprofile_best_by_phase.csv")
