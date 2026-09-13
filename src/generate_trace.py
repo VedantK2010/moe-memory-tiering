@@ -24,9 +24,14 @@ Output:
   - trace_summary.png      : validation plots (popularity + locality)
 """
 
+import matplotlib
+matplotlib.use("Agg")           # headless: never try to open a window
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+import paths
 
 # ----------------------------------------------------------------------
 # Configuration
@@ -186,10 +191,13 @@ if __name__ == "__main__":
         choices, columns=[f"expert_{i+1}" for i in range(TOP_K)]
     )
     df.insert(0, "token_id", np.arange(NUM_TOKENS))
-    df.to_csv("expert_trace.csv", index=False)
+    trace_path = paths.data("expert_trace.csv")
+    df.to_csv(trace_path, index=False)
 
-    write_dramsim3_trace(choices, EXPERT_SIZE_BYTES, BASE_ADDRESS, "dramsim3_trace.txt")
+    dram_path = paths.data("dramsim3_trace.txt")
+    write_dramsim3_trace(choices, EXPERT_SIZE_BYTES, BASE_ADDRESS, dram_path)
 
-    summarize_and_plot(choices, base_probs, NUM_EXPERTS, P_REPEAT, "trace_summary.png")
+    plot_path = paths.result("trace_summary.png")
+    summarize_and_plot(choices, base_probs, NUM_EXPERTS, P_REPEAT, plot_path)
 
-    print("\nWrote: expert_trace.csv, dramsim3_trace.txt, trace_summary.png")
+    print(f"\nWrote: {trace_path}\n       {dram_path}\n       {plot_path}")

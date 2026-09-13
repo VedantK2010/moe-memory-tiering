@@ -12,17 +12,21 @@ reserved) on Dataset 2's actual trace, and compares the BEST possible
 hybrid score against Periodic Re-profile's score on the same dataset.
 """
 
+import matplotlib
+matplotlib.use("Agg")
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import paths
 from hybrid_strategy import simulate_hybrid_by_phase
 
 NUM_EXPERTS = 8
 CAPACITY_K = 4
 
 if __name__ == "__main__":
-    trace_df = pd.read_csv("dataset2_trace.csv")
+    trace_df = pd.read_csv(paths.require_data("dataset2_trace.csv"))
 
     counts = trace_df[trace_df["phase"] == 0]["expert_1"].value_counts()
     ranked_from_phase0 = counts.index.tolist()
@@ -41,7 +45,7 @@ if __name__ == "__main__":
         })
 
     results_df = pd.DataFrame(results)
-    results_df.to_csv("dataset2_hybrid_split_sweep.csv", index=False)
+    results_df.to_csv(paths.result("dataset2_hybrid_split_sweep.csv"), index=False)
 
     print("=== Hybrid split sweep on Dataset 2 ===")
     print(results_df.to_string(index=False))
@@ -50,18 +54,28 @@ if __name__ == "__main__":
     print(f"\nBest split on Dataset 2: {int(best_row['num_reserved_static'])} reserved / "
           f"{int(best_row['num_lru_slots'])} LRU  -->  {best_row['overall_avg_time_ns']:.1f} ns")
 
-    # Reference points from the earlier robustness check
-    dataset2_static = 124027.97
-    dataset2_lru = 119661.70
-    dataset2_hybrid_5050 = 132314.89
-    dataset2_reprofile = 97776.06
+    # Reference points come from the robustness check's own output rather
+    # than pasted literals, so they cannot drift out of step with it.
+    summary_path = paths.RESULTS_DIR / "robustness_check_summary.csv"
+    if not summary_path.exists():
+        raise SystemExit(f"Run src/robustness_check.py first -- {summary_path.name} is missing.")
+    summary = pd.read_csv(summary_path).set_index("strategy")["dataset2_overall_ns"]
+
+    dataset2_static = summary["Pure Static"]
+    dataset2_lru = summary["Pure LRU"]
+    dataset2_hybrid_5050 = summary["Hybrid"]
+    dataset2_reprofile = summary["Periodic Re-profile"]
 
     print(f"\nFor comparison, on the SAME Dataset 2:")
-    print(f"  Pure Static:              {dataset2_static:.1f} ns")
-    print(f"  Pure LRU:                 {dataset2_lru:.1f} ns")
-    print(f"  Hybrid (fixed 50/50):     {dataset2_hybrid_5050:.1f} ns")
-    print(f"  Hybrid (BEST tuned split):{best_row['overall_avg_time_ns']:.1f} ns")
-    print(f"  Periodic Re-profile:      {dataset2_reprofile:.1f} ns")
+    print(f"  Pure Static:               {dataset2_static:.1f} ns")
+    print(f"  Pure LRU:                  {dataset2_lru:.1f} ns")
+    print(f"  Hybrid (fixed 50/50):      {dataset2_hybrid_5050:.1f} ns")
+    print(f"  Hybrid (BEST tuned split): {best_row['overall_avg_time_ns']:.1f} ns")
+    print(f"  Periodic Re-profile:       {dataset2_reprofile:.1f} ns")
+
+    if best_row["num_reserved_static"] == 0:
+        print("\n  The best 'hybrid' on this dataset reserves NOTHING -- it is pure LRU.")
+        print("  Tuning the split does not rescue the hybrid here; it dissolves it.")
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
     ax.plot(results_df["num_reserved_static"], results_df["overall_avg_time_ns"],
@@ -77,6 +91,8 @@ if __name__ == "__main__":
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     plt.tight_layout()
-    plt.savefig("dataset2_hybrid_tuning.png", dpi=150)
+    plt.savefig(paths.result("dataset2_hybrid_tuning.png"), dpi=150)
 
-    print("\nWrote: dataset2_hybrid_split_sweep.csv, dataset2_hybrid_tuning.png")
+    print(f"\nWrote into {paths.RESULTS_DIR}:"
+          f"\n       dataset2_hybrid_split_sweep.csv"
+          f"\n       dataset2_hybrid_tuning.png")

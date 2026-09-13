@@ -1,0 +1,1638 @@
+<title>Expert Tiering Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* ------------------------------------------------------------------ *
+ * Tokens. Light is defined on bare :root; dark is redefined twice so
+ * the OS setting and the explicit theme stamp both resolve correctly.
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+
+  --plane:      #eef0f2;   /* page ground, cool slate-grey */
+  --panel:      #f8f9fa;   /* reading panels */
+  --surface:    #fbfcfd;   /* chart wells (reference light surface) */
+  --well:       #e4e8eb;   /* recessed instrument wells */
+
+  --ink:        #0b0e11;
+  --ink-2:      #4e545a;
+  --muted:      #7d848b;
+  --grid:       #dde2e6;
+  --rule:       #c2c9cf;
+  --hairline:   rgba(11,14,17,.11);
+
+  --s1: #2a78d6;  /* blue    — Static / HBM        */
+  --s2: #eb6834;  /* orange  — LRU / CXL           */
+  --s3: #1baf7a;  /* aqua    — Periodic re-profile */
+  --s4: #eda100;  /* yellow  — Hybrid              */
+  --s5: #e87ba4;  /* magenta — Prefetch            */
+
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --critical: #d03b3b;
+  --good-ink: #006300;
+
+  --shadow: 0 1px 2px rgba(11,14,17,.05), 0 8px 24px -16px rgba(11,14,17,.22);
+
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  --maxw: 1160px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --plane:    #0b0d0f;
+    --panel:    #13171b;
+    --surface:  #171b20;
+    --well:     #101317;
+    --ink:      #ffffff;
+    --ink-2:    #b9c0c7;
+    --muted:    #858c93;
+    --grid:     #262b31;
+    --rule:     #343a41;
+    --hairline: rgba(255,255,255,.11);
+    --s1: #3987e5;  --s2: #d95926;  --s3: #199e70;  --s4: #c98500;  --s5: #d55181;
+    --good-ink: #0ca30c;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane:    #0b0d0f;
+  --panel:    #13171b;
+  --surface:  #171b20;
+  --well:     #101317;
+  --ink:      #ffffff;
+  --ink-2:    #b9c0c7;
+  --muted:    #858c93;
+  --grid:     #262b31;
+  --rule:     #343a41;
+  --hairline: rgba(255,255,255,.11);
+  --s1: #3987e5;  --s2: #d95926;  --s3: #199e70;  --s4: #c98500;  --s5: #d55181;
+  --good-ink: #0ca30c;
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -18px rgba(0,0,0,.8);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.12; letter-spacing: -.015em; }
+
+a { color: var(--s1); }
+
+/* ---------------------------------------------------------- shell -- */
+.shell {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: 44px;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding-inline: 20px;
+  padding-block: 0 96px;
+}
+
+/* the memory-map rail: section list addressed like a memory map */
+.rail { position: sticky; top: 0; align-self: start; padding-top: 34px; height: 100vh; overflow-y: auto; }
+.rail-title {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 14px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--hairline);
+}
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rail a {
+  display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: baseline;
+  padding: 7px 0; text-decoration: none; color: var(--ink-2); font-size: 13px;
+  border-left: 2px solid transparent; padding-left: 10px; margin-left: -12px;
+  transition: color .15s, border-color .15s;
+}
+.rail a:hover, .rail a:focus-visible { color: var(--ink); border-left-color: var(--s1); }
+.rail a.is-current { color: var(--ink); border-left-color: var(--s1); font-weight: 600; }
+.rail .addr { font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); letter-spacing: .02em; }
+
+.main { min-width: 0; padding-top: 34px; }
+
+/* --------------------------------------------------------- header -- */
+.masthead { border-bottom: 1px solid var(--rule); padding-bottom: 30px; margin-bottom: 8px; }
+.eyebrow {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .17em; text-transform: uppercase;
+  color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+}
+.eyebrow .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--s1); display: inline-block; }
+h1 { font-size: clamp(34px, 5.4vw, 56px); font-weight: 700; margin: 16px 0 0; }
+h1 .thin { font-weight: 500; color: var(--ink-2); }
+.dek { font-size: 17px; color: var(--ink-2); max-width: 62ch; margin-top: 16px; }
+.byline { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); margin-top: 18px; }
+
+/* headline figures — three, because the finding has three parts */
+.figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--hairline);
+  border: 1px solid var(--hairline); margin-top: 30px; }
+.fig { background: var(--panel); padding: 18px 18px 20px; }
+.fig .k { font-family: var(--f-mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.fig .v { font-family: var(--f-display); font-size: 34px; font-weight: 700; margin-top: 8px; letter-spacing: -.02em; }
+.fig .v small { font-size: 17px; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
+.fig .n { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; }
+
+/* -------------------------------------------------------- section -- */
+section { padding-top: 64px; scroll-margin-top: 24px; }
+.sec-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--rule); padding-bottom: 12px; margin-bottom: 22px; }
+.sec-head .addr { font-family: var(--f-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+.sec-head h2 { font-size: clamp(21px, 2.6vw, 27px); font-weight: 600; }
+.lede { font-size: 15.5px; color: var(--ink-2); max-width: 66ch; }
+.lede + .lede { margin-top: 12px; }
+p { margin: 0 0 14px; }
+p:last-child { margin-bottom: 0; }
+
+.note {
+  border-left: 2px solid var(--s1); padding: 2px 0 2px 16px; margin: 22px 0 0;
+  font-size: 14px; color: var(--ink-2); max-width: 66ch;
+}
+.note strong { color: var(--ink); font-weight: 600; }
+.note.warn { border-left-color: var(--warning); }
+
+/* ------------------------------------------------------ instrument -- */
+.panel { background: var(--panel); border: 1px solid var(--hairline); box-shadow: var(--shadow); margin-top: 22px; }
+.panel-head {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 13px 18px; border-bottom: 1px solid var(--hairline);
+}
+.panel-head h3 { font-size: 14px; font-weight: 600; letter-spacing: -.005em; }
+.panel-head .sub { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.panel-body { padding: 18px; }
+.panel-body.tight { padding: 10px 12px 14px; }
+
+.chartwell { background: var(--surface); border: 1px solid var(--hairline); padding: 8px 10px 4px; }
+.chartwell + .chartwell { margin-top: 14px; }
+
+/* ------------------------------------------------------- controls -- */
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; }
+.ctl { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ctl label { font-family: var(--f-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.ctl .rd { font-family: var(--f-mono); font-size: 13px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--s1); height: 22px; }
+.ctl.slider { flex: 1 1 180px; }
+
+.segmented { display: inline-flex; border: 1px solid var(--rule); background: var(--surface); }
+.segmented button {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 7px 13px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer;
+  border-right: 1px solid var(--hairline);
+}
+.segmented button:last-child { border-right: 0; }
+.segmented button[aria-pressed="true"] { background: var(--s1); color: #fff; }
+.segmented button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
+
+.btn {
+  font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 8px 15px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  cursor: pointer; transition: background .14s, border-color .14s;
+}
+.btn:hover { border-color: var(--s1); }
+.btn:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
+.btn.primary { background: var(--s1); border-color: var(--s1); color: #fff; }
+.btn.primary:hover { filter: brightness(1.07); }
+
+/* --------------------------------------------- the two-rail engine -- */
+.bus { background: var(--well); border: 1px solid var(--hairline); padding: 16px 18px 18px; }
+.bus-label { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--f-mono);
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.rails { position: relative; margin-top: 10px; overflow: hidden; }
+.rail-row { position: relative; height: 54px; border: 1px dashed var(--rule); }
+.rail-row + .rail-row { margin-top: 30px; }
+.rail-row::after {
+  content: attr(data-tag); position: absolute; right: 7px; top: 6px;
+  font-family: var(--f-mono); font-size: 9.5px; letter-spacing: .14em; color: var(--muted);
+}
+.rail-row.hbm { border-color: color-mix(in srgb, var(--s1) 45%, transparent); background: color-mix(in srgb, var(--s1) 7%, transparent); }
+.rail-row.cxl { border-color: color-mix(in srgb, var(--s2) 40%, transparent); background: color-mix(in srgb, var(--s2) 5%, transparent); }
+
+.blk {
+  position: absolute; top: 8px; left: 0; height: 38px; width: 52px;
+  display: grid; place-items: center; gap: 0;
+  font-family: var(--f-mono); font-size: 11px; font-weight: 600;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2);
+  transition: transform .34s cubic-bezier(.4,.9,.3,1), background-color .2s, color .2s, border-color .2s, box-shadow .2s;
+  will-change: transform;
+}
+.blk .pct { font-size: 9px; font-weight: 400; color: var(--muted); letter-spacing: .02em; }
+.blk.in-hbm { border-color: var(--s1); color: var(--s1); background: color-mix(in srgb, var(--s1) 12%, var(--surface)); }
+.blk.in-hbm .pct { color: var(--s1); }
+.blk.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.blk.fault { border-color: var(--s2); color: var(--s2); background: color-mix(in srgb, var(--s2) 16%, var(--surface)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .blk { transition: none; }
+  * { animation-duration: .001ms !important; }
+}
+
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 1px;
+  background: var(--hairline); border: 1px solid var(--hairline); margin-top: 16px; }
+.ro { background: var(--panel); padding: 10px 12px; }
+.ro .k { font-family: var(--f-mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.ro .v { font-family: var(--f-mono); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 3px; }
+
+/* policy scoreboard */
+.scores { display: flex; flex-direction: column; gap: 1px; background: var(--hairline);
+  border: 1px solid var(--hairline); }
+.score { display: grid; grid-template-columns: 150px minmax(0,1fr) 62px; gap: 12px; align-items: center;
+  background: var(--panel); padding: 9px 12px; }
+.score .nm { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+.score .chip { width: 9px; height: 9px; flex: none; }
+.score .track { height: 9px; background: var(--well); position: relative; overflow: hidden; }
+.score .bar { position: absolute; inset: 0 auto 0 0; border-radius: 0 4px 4px 0; transition: width .2s linear; }
+.score .val { font-family: var(--f-mono); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.score.lead .nm { font-weight: 600; }
+
+/* hit/miss tape */
+.tape { display: flex; gap: 2px; margin-top: 14px; height: 22px; align-items: flex-end; overflow: hidden; }
+.tape i { flex: 1 1 0; min-width: 0; background: var(--grid); }
+.tape i.h { background: var(--s1); height: 22px; }
+.tape i.m { background: var(--s2); height: 11px; }
+
+/* ---------------------------------------------------------- table -- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--hairline); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: right; padding: 9px 13px; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-family: var(--f-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); font-weight: 500; background: var(--well); }
+tbody td { font-variant-numeric: tabular-nums; font-family: var(--f-mono); }
+tbody td:first-child { font-family: var(--f-body); }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr.win td { background: color-mix(in srgb, var(--s3) 9%, transparent); }
+.cellchip { display: inline-block; width: 8px; height: 8px; margin-right: 7px; vertical-align: baseline; }
+
+/* --------------------------------------------------------- legend -- */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 6px 2px 2px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+.legend i { width: 10px; height: 10px; flex: none; }
+.legend i.line { height: 3px; width: 15px; border-radius: 2px; }
+
+/* -------------------------------------------------------- tooltip -- */
+#tip {
+  position: fixed; z-index: 60; pointer-events: none; opacity: 0;
+  background: var(--panel); border: 1px solid var(--rule); box-shadow: var(--shadow);
+  padding: 8px 11px; font-size: 12px; transition: opacity .1s; max-width: 260px;
+}
+#tip .t { font-family: var(--f-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+#tip .r { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+#tip .r i { width: 8px; height: 8px; flex: none; }
+#tip .r b { margin-left: auto; font-family: var(--f-mono); font-weight: 600; padding-left: 14px; }
+
+/* ---------------------------------------------------------- misc --- */
+.cols2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .grid-2 { grid-template-columns: 1fr; } }
+
+.deflist { display: grid; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); margin-top: 20px; }
+.deflist > div { background: var(--panel); padding: 14px 16px; display: grid; grid-template-columns: 168px minmax(0,1fr); gap: 18px; }
+.deflist dt { font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; color: var(--ink); text-transform: uppercase; }
+.deflist dd { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+@media (max-width: 700px) { .deflist > div { grid-template-columns: 1fr; gap: 5px; } }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-mono);
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid currentColor;
+}
+.pill.measured { color: var(--good-ink); }
+.pill.modelled { color: var(--muted); }
+.pill.replay  { color: var(--s1); }
+
+footer { margin-top: 72px; padding-top: 22px; border-top: 1px solid var(--rule);
+  font-family: var(--f-mono); font-size: 11px; color: var(--muted); line-height: 1.8; }
+
+/* --------------------------------------------------------- narrow -- */
+@media (max-width: 940px) {
+  .shell { grid-template-columns: minmax(0,1fr); gap: 0; }
+  .rail { position: static; height: auto; padding-top: 26px; overflow: visible; }
+  .rail ol { flex-direction: row; flex-wrap: wrap; gap: 2px 4px; }
+  .rail a { border-left: 0; border-bottom: 2px solid transparent; margin-left: 0; padding: 5px 9px;
+    grid-template-columns: auto; background: var(--panel); }
+  .rail a .addr { display: none; }
+  .rail a.is-current { border-bottom-color: var(--s1); }
+  .main { padding-top: 24px; }
+  .figures { grid-template-columns: 1fr; }
+  .score { grid-template-columns: 120px minmax(0,1fr) 56px; gap: 9px; }
+}
+@media (max-width: 480px) {
+  .score { grid-template-columns: 104px minmax(0,1fr) 52px; }
+  .fig .v { font-size: 29px; }
+}
+</style>
+
+<div id="tip" aria-hidden="true"></div>
+
+<div class="shell">
+
+  <nav class="rail" aria-label="Sections">
+    <div class="rail-title">Memory map</div>
+    <ol id="railnav">
+      <li><a href="#engine"><span class="addr">0x00</span><span>Live tiering engine</span></a></li>
+      <li><a href="#config"><span class="addr">0x10</span><span>Capacity vs latency</span></a></li>
+      <li><a href="#placement"><span class="addr">0x20</span><span>Does placement matter?</span></a></li>
+      <li><a href="#depth"><span class="addr">0x30</span><span>Depth changes the winner</span></a></li>
+      <li><a href="#shift"><span class="addr">0x40</span><span>When the workload shifts</span></a></li>
+      <li><a href="#interval"><span class="addr">0x50</span><span>Re-profiling cadence</span></a></li>
+      <li><a href="#energy"><span class="addr">0x60</span><span>Energy &amp; power</span></a></li>
+      <li><a href="#robust"><span class="addr">0x70</span><span>Robustness</span></a></li>
+      <li><a href="#method"><span class="addr">0x80</span><span>Method &amp; limitations</span></a></li>
+    </ol>
+  </nav>
+
+  <main class="main">
+
+    <header class="masthead">
+      <div class="eyebrow"><span class="dot"></span> CXL-based memory optimisation for MoE models</div>
+      <h1>Expert tiering<br><span class="thin">across HBM and CXL</span></h1>
+      <p class="dek">
+        Mixture-of-Experts models keep eight FFN experts per layer resident but touch only two per token.
+        That is an invitation to demote the cold ones to CXL-attached memory &mdash; if the placement policy
+        is good enough to keep the hot ones local. We measured 1.66&nbsp;million real Mixtral&nbsp;8x7B routing
+        decisions against four policies and a cycle-accurate DRAM model. The best policy is not the same
+        one at every layer.
+      </p>
+      <div class="byline">Vedant Kabra &middot; Neil Verma &nbsp;&nbsp;|&nbsp;&nbsp; Mixtral 8x7B &middot; DRAMSim3 &middot; HBM2 + CXL 2.0</div>
+
+      <div class="figures">
+        <div class="fig">
+          <div class="k">Layer 15 &mdash; best policy</div>
+          <div class="v">64.9<small>%</small></div>
+          <div class="n">HBM hit rate under pure LRU, <strong>+7.4&nbsp;pts</strong> over static placement. Middle layers re-route fast; recency wins.</div>
+        </div>
+        <div class="fig">
+          <div class="k">Layer 31 &mdash; best policy</div>
+          <div class="v">67.3<small>%</small></div>
+          <div class="n">Periodic re-profiling takes the lead, with LRU only <strong>0.2&nbsp;pts</strong> ahead of static. Deep experts specialise and stay put.</div>
+        </div>
+        <div class="fig">
+          <div class="k">Memory energy saved</div>
+          <div class="v">8.0<small>%</small></div>
+          <div class="n">Fewer CXL crossings at layer&nbsp;15, at a <strong>3&times;</strong> per-fetch energy penalty over the PCIe&nbsp;Gen5 PHY.</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============================================================ -->
+    <section id="engine">
+      <div class="sec-head"><span class="addr">0x00</span><h2>The live tiering engine</h2></div>
+      <p class="lede">
+        Eight experts, a fixed HBM budget, and a token stream arriving one at a time. Watch where each
+        expert physically sits. Blocks on the upper rail are resident in HBM and answer at HBM speed;
+        blocks that fall to the lower rail must be fetched back across CXL. Every policy below is running
+        the same trace simultaneously.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Replay &mdash; <span id="eng-policy-name">Pure LRU</span></h3>
+          <span class="sub"><span class="pill replay">Calibrated replay</span></span>
+        </div>
+        <div class="panel-body">
+
+          <div class="controls" style="margin-bottom:16px">
+            <div class="ctl">
+              <label for="eng-trace">Trace</label>
+              <div class="segmented" id="eng-trace" role="group" aria-label="Trace source">
+                <button type="button" data-trace="l15" aria-pressed="true">Mixtral L15</button>
+                <button type="button" data-trace="l31" aria-pressed="false">Mixtral L31</button>
+                <button type="button" data-trace="shift" aria-pressed="false">Shifting</button>
+              </div>
+            </div>
+            <div class="ctl">
+              <label for="eng-rail">Rail shown</label>
+              <div class="segmented" id="eng-rail" role="group" aria-label="Policy shown on the rails">
+                <button type="button" data-pol="lru" aria-pressed="true">LRU</button>
+                <button type="button" data-pol="static" aria-pressed="false">Static</button>
+                <button type="button" data-pol="periodic" aria-pressed="false">Periodic</button>
+                <button type="button" data-pol="hybrid" aria-pressed="false">Hybrid</button>
+                <button type="button" data-pol="prefetch" aria-pressed="false">Prefetch</button>
+              </div>
+            </div>
+            <div class="ctl slider">
+              <label for="eng-k">HBM budget <span class="rd" id="eng-k-rd">4 of 8 experts</span></label>
+              <input type="range" id="eng-k" min="1" max="7" step="1" value="4">
+            </div>
+            <div class="ctl slider">
+              <label for="eng-speed">Speed <span class="rd" id="eng-speed-rd">12 tok/s</span></label>
+              <input type="range" id="eng-speed" min="1" max="60" step="1" value="12">
+            </div>
+            <div class="ctl">
+              <label>Transport</label>
+              <div style="display:flex;gap:8px">
+                <button type="button" class="btn primary" id="eng-play">Pause</button>
+                <button type="button" class="btn" id="eng-step">Step</button>
+                <button type="button" class="btn" id="eng-reset">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bus">
+            <div class="bus-label">
+              <span>Expert residency &mdash; <span id="eng-policy-tag">pure lru</span></span>
+              <span id="eng-token">token 000000</span>
+            </div>
+            <div class="rails" id="eng-rails">
+              <div class="rail-row hbm" data-tag="HBM &middot; local" id="rail-hbm"></div>
+              <div class="rail-row cxl" data-tag="CXL &middot; expansion" id="rail-cxl"></div>
+              <div id="eng-blocks"></div>
+            </div>
+            <div class="tape" id="eng-tape" title="Recent 64 accesses: tall = HBM hit, short = CXL fetch"></div>
+          </div>
+
+          <div class="readouts">
+            <div class="ro"><div class="k">Tokens replayed</div><div class="v" id="ro-tok">0</div></div>
+            <div class="ro"><div class="k">HBM hit rate</div><div class="v" id="ro-hit">0.0%</div></div>
+            <div class="ro"><div class="k">CXL fetches</div><div class="v" id="ro-miss">0</div></div>
+            <div class="ro"><div class="k">Avg access</div><div class="v" id="ro-lat">0 &micro;s</div></div>
+            <div class="ro"><div class="k">vs HBM-only</div><div class="v" id="ro-slow">&mdash;</div></div>
+          </div>
+
+          <h4 style="font-size:12px;font-family:var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:22px 0 10px">
+            All five policies, same trace, same budget
+          </h4>
+          <div class="scores" id="eng-scores"></div>
+        </div>
+      </div>
+
+      <p class="note">
+        <strong>What you are watching.</strong> The replay is a seeded stream calibrated to the per-expert
+        selection frequency and consecutive-repeat rate we measured in the real Mixtral traces &mdash; it is an
+        illustration of the mechanism, not the measurement. Every headline number elsewhere on this page is
+        computed on the full 1.66&nbsp;M-decision recorded trace and is marked
+        <span class="pill measured">Measured</span>.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="config">
+      <div class="sec-head"><span class="addr">0x10</span><h2>Capacity bought with latency</h2></div>
+      <p class="lede">
+        The tier model is the standard one: an access costs a fixed time-to-first-byte plus the transfer
+        itself, <span style="font-family:var(--f-mono);font-size:13px">t = L + S/B</span>. Move the hardware
+        and the trade-off moves with it. The access counts below are the real ones measured on our trace at
+        each budget; only the timing model is yours to change.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Memory configurator</h3>
+          <span class="sub">recomputed live</span>
+        </div>
+        <div class="panel-body">
+          <div class="controls" style="margin-bottom:18px">
+            <div class="ctl slider">
+              <label for="c-hlat">HBM latency <span class="rd" id="c-hlat-rd">150 ns</span></label>
+              <input type="range" id="c-hlat" min="60" max="300" step="5" value="150">
+            </div>
+            <div class="ctl slider">
+              <label for="c-hbw">HBM bandwidth <span class="rd" id="c-hbw-rd">800 GB/s</span></label>
+              <input type="range" id="c-hbw" min="200" max="1600" step="25" value="800">
+            </div>
+            <div class="ctl slider">
+              <label for="c-cadd">CXL added latency <span class="rd" id="c-cadd-rd">+70 ns</span></label>
+              <input type="range" id="c-cadd" min="20" max="400" step="5" value="70">
+            </div>
+            <div class="ctl slider">
+              <label for="c-cbw">CXL bandwidth <span class="rd" id="c-cbw-rd">64 GB/s</span></label>
+              <input type="range" id="c-cbw" min="16" max="256" step="4" value="64">
+            </div>
+            <div class="ctl slider">
+              <label for="c-size">Expert size <span class="rd" id="c-size-rd">16 MiB</span></label>
+              <input type="range" id="c-size" min="0" max="5" step="1" value="0">
+            </div>
+            <div class="ctl">
+              <label for="c-reset">&nbsp;</label>
+              <button type="button" class="btn" id="c-reset">Reset to paper values</button>
+            </div>
+          </div>
+
+          <div class="readouts" style="margin-bottom:16px">
+            <div class="ro"><div class="k">HBM access</div><div class="v" id="c-ro-h">&mdash;</div></div>
+            <div class="ro"><div class="k">CXL access</div><div class="v" id="c-ro-c">&mdash;</div></div>
+            <div class="ro"><div class="k">Miss penalty</div><div class="v" id="c-ro-p">&mdash;</div></div>
+            <div class="ro"><div class="k">At k=4, freed</div><div class="v" id="c-ro-f">&mdash;</div></div>
+            <div class="ro"><div class="k">At k=4, slower by</div><div class="v" id="c-ro-s">&mdash;</div></div>
+          </div>
+
+          <div class="chartwell">
+            <div id="chart-config" role="img" aria-label="Average access time against HBM budget for three placement policies"></div>
+            <div class="legend" id="legend-config"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note warn">
+        <strong>Read the shape, not the absolute.</strong> Because the model charges a full expert transfer on
+        every access, absolute times land in the hundreds of microseconds &mdash; far above a real decoder step,
+        where a resident expert is read from HBM at tile granularity and never re-fetched. The curve's
+        <em>slope</em> &mdash; how much each demoted expert costs &mdash; is the result that survives; the intercept is an
+        artefact of the charging model. Push "expert size" to Mixtral's true 336&nbsp;MiB per expert (fp16) to
+        see how badly a per-token re-fetch assumption scales.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="placement">
+      <div class="sec-head"><span class="addr">0x20</span><h2>Does placement intelligence actually pay?</h2></div>
+      <p class="lede">
+        "Less CXL is faster" is true no matter which experts you pick, so it proves nothing. The honest test
+        holds the capacity budget fixed and asks whether a hot/cold ranking beats an arbitrary one. Against
+        20 random placements per budget, frequency-ranked placement wins at every non-trivial budget, peaking
+        where the decision is hardest &mdash; six of eight slots.
+      </p>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><h3>Smart vs random, same budget</h3><span class="sub"><span class="pill measured">Measured</span></span></div>
+          <div class="panel-body tight">
+            <div class="chartwell">
+              <div id="chart-svr" role="img" aria-label="Average access time for frequency-ranked versus random expert placement at each HBM budget"></div>
+              <div class="legend" id="legend-svr"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Advantage of ranking</h3><span class="sub">percent faster than random</span></div>
+          <div class="panel-body tight">
+            <div class="chartwell">
+              <div id="chart-adv" role="img" aria-label="Percentage speed advantage of frequency-ranked placement over random placement at each HBM budget"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        <strong>The endpoints are degenerate by construction.</strong> At k=0 and k=8 every placement is the
+        same placement, so the advantage is exactly zero &mdash; that is a sanity check on the harness, not a
+        result. The interesting region is 4&ndash;7 slots, which is also the region a real deployment would
+        actually operate in.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="depth">
+      <div class="sec-head"><span class="addr">0x30</span><h2>Depth changes which policy wins</h2></div>
+      <p class="lede">
+        This is the finding we did not expect. We pulled every routing decision from two layers of the
+        <span style="font-family:var(--f-mono);font-size:13px">allenai/analysis_mixtral</span> trace &mdash; layer 15
+        in the middle of the stack, layer 31 at the top &mdash; and ran the same three policies on both. The
+        ordering inverts.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>HBM hit rate by policy and depth</h3>
+          <div class="segmented" id="depth-toggle" role="group" aria-label="Layer">
+            <button type="button" data-layer="both" aria-pressed="true">Both</button>
+            <button type="button" data-layer="l15" aria-pressed="false">Layer 15</button>
+            <button type="button" data-layer="l31" aria-pressed="false">Layer 31</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-depth" role="img" aria-label="HBM hit rate for static, periodic re-profiling and LRU at layers 15 and 31"></div>
+            <div class="legend" id="legend-depth"></div>
+          </div>
+          <div class="tablewrap" style="margin-top:16px">
+            <table>
+              <caption class="sr-only" style="position:absolute;left:-9999px">HBM hit rate by policy and layer</caption>
+              <thead><tr><th>Policy</th><th>Layer 15</th><th>Layer 31</th><th>&Delta; deep &minus; mid</th></tr></thead>
+              <tbody id="tbody-depth"></tbody>
+            </table>
+          </div>
+          <div id="depth-verdict" class="note" style="margin-top:18px"></div>
+        </div>
+      </div>
+
+      <div class="cols2" style="margin-top:26px">
+        <div>
+          <h3 style="font-size:15px;margin-bottom:8px">Middle layers route on context</h3>
+          <p style="font-size:14px;color:var(--ink-2)">
+            At layer 15 the identity of the hot expert turns over quickly with the subject matter. A frozen
+            top-4 is stale within a few thousand tokens, which is why static bottoms out at 57.5% while LRU,
+            which re-decides on every access, reaches 64.9%. Re-profiling every 2,000 tokens lands between
+            them &mdash; it adapts, but on a delay.
+          </p>
+        </div>
+        <div>
+          <h3 style="font-size:15px;margin-bottom:8px">Deep layers route on syntax</h3>
+          <p style="font-size:14px;color:var(--ink-2)">
+            At layer 31 routing concentrates on a stable handful of experts, so a frozen top-4 is already
+            close to optimal: static reaches 65.8% and LRU beats it by 0.15&nbsp;points &mdash; inside the noise.
+            Periodic re-profiling wins here precisely because it is <em>less</em> reactive: it keeps a good
+            set instead of churning it.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="shift">
+      <div class="sec-head"><span class="addr">0x40</span><h2>When the workload shifts underneath you</h2></div>
+      <p class="lede">
+        To isolate adaptation from everything else, we built a three-phase synthetic trace whose hot experts
+        rotate at each boundary, and gave the static policy the deal a real deployment gets: profile once on
+        phase 0, then live with it. No look-ahead for anyone.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Average access time per phase</h3><span class="sub"><span class="pill modelled">Synthetic</span> HBM budget = 4</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-phase" role="img" aria-label="Average access time per phase for four placement policies under a shifting workload"></div>
+            <div class="legend" id="legend-phase"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        <strong>Static's collapse is the whole story.</strong> It is the fastest policy in phase 0 &mdash; it was
+        tuned on phase 0 &mdash; and the slowest by phase 2, degrading 12.5% as the distribution rotates away
+        from it. Periodic re-profiling is the only policy that is never worst in any phase, which is what
+        makes it the best <em>overall</em> choice despite never being the best in phase 0.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="interval">
+      <div class="sec-head"><span class="addr">0x50</span><h2>How often should you re-profile?</h2></div>
+      <p class="lede">
+        Re-profiling is not free &mdash; every re-rank implies migrating experts across the link. Too frequent and
+        you chase noise in a short window; too rare and you are running a stale map. The curve has a clear
+        floor at roughly 2,000 tokens between re-ranks.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Re-profiling interval sweep</h3><span class="sub">log scale &middot; lower is better</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-interval" role="img" aria-label="Overall average access time against re-profiling interval, with three baseline policies"></div>
+            <div class="legend" id="legend-interval"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        At a 2,000-token cadence the policy beats all three fixed alternatives. Pushed out to 20,000 tokens it
+        is <em>worse than doing nothing</em> &mdash; it has become static placement with extra migration traffic.
+        The window has to be short enough to catch a phase change and long enough to estimate a ranking from.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="energy">
+      <div class="sec-head"><span class="addr">0x60</span><h2>Energy follows the hit rate</h2></div>
+      <p class="lede">
+        A CXL fetch crosses a PCIe&nbsp;Gen5 PHY, and the PHY is where the joules go. Charging CXL at roughly
+        3&times; an equivalent local HBM fetch, total memory energy tracks hit rate almost exactly &mdash; which
+        means the policy choice at layer 15 is worth about 8% of the memory power budget.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Total memory energy over 829,441 tokens</h3><span class="sub"><span class="pill measured">Measured hit rates</span> <span class="pill modelled">Modelled J/fetch</span></span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-energy" role="img" aria-label="Total memory energy per policy at layers 15 and 31"></div>
+            <div class="legend" id="legend-energy"></div>
+          </div>
+          <div class="tablewrap" style="margin-top:16px">
+            <table>
+              <thead><tr><th>Layer</th><th>Policy</th><th>Hit rate</th><th>Total energy</th><th>Per token</th><th>vs worst</th></tr></thead>
+              <tbody id="tbody-energy"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <p class="note warn">
+        <strong>The ratio is sound; the absolute is not.</strong> Our 21.08&nbsp;nJ/fetch constant comes from
+        DRAMSim3 total energy divided by request count, so it carries the simulator's background and refresh
+        power amortised over the run &mdash; it is energy-per-request-in-that-window, not the marginal cost of one
+        64&nbsp;B burst. Every percentage on this page is a ratio of two figures built from the same constant,
+        so the constant cancels and the savings hold. The millijoule column does not transfer to silicon.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="robust">
+      <div class="sec-head"><span class="addr">0x70</span><h2>Does the ranking survive a second dataset?</h2></div>
+      <p class="lede">
+        Every result above rests on particular random draws. We regenerated an independent trace &mdash; different
+        seed, sharper skew (&alpha;=3 rather than 6), different locality target &mdash; and re-ran all four policies.
+        One policy holds its rank; one does not.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Rank stability across two independent datasets</h3><span class="sub">lower time = better rank</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-robust" role="img" aria-label="Overall average access time for each policy on dataset 1 and dataset 2"></div>
+            <div class="legend" id="legend-robust"></div>
+          </div>
+          <div class="tablewrap" style="margin-top:16px">
+            <table>
+              <thead><tr><th>Policy</th><th>Dataset 1</th><th>Rank</th><th>Dataset 2</th><th>Rank</th><th>Verdict</th></tr></thead>
+              <tbody id="tbody-robust"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <p class="note warn">
+        <strong>Hybrid is the one that breaks.</strong> It goes from 2nd to 4th. Sweeping its
+        reserved/LRU split on dataset&nbsp;2 shows why: the best split there is 0 reserved &mdash; that is, pure LRU.
+        The fixed 50/50 ratio was tuned on dataset 1 and does not transfer, so we report the hybrid as a
+        <em>negative</em> result rather than dropping it. Periodic re-profiling is 1st on both.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="method">
+      <div class="sec-head"><span class="addr">0x80</span><h2>Method, and what it does not show</h2></div>
+      <p class="lede">
+        The simplifications below are load-bearing. Each one is a place where a reviewer should discount the
+        result, and each is something the next version of this work should close.
+      </p>
+
+      <div class="deflist">
+        <div><dt>Tier model</dt><dd>Access time is latency + size/bandwidth, with HBM at 150&nbsp;ns / 800&nbsp;GB/s and CXL at 220&nbsp;ns / 64&nbsp;GB/s. These are defensible published ballparks, not a specific part's datasheet numbers.</dd></div>
+        <div><dt>DRAM validation</dt><dd>256,000 burst commands through DRAMSim3 on an HBM2 config: 60.71&nbsp;ns mean burst latency, 88.08% row-buffer hit rate. The high row-buffer rate is what justifies treating a bulk expert fetch as a near-streaming transfer in the analytic model.</dd></div>
+        <div><dt>Trace</dt><dd>1.66&nbsp;M recorded top-1 routing decisions from <span style="font-family:var(--f-mono);font-size:12.5px">allenai/analysis_mixtral</span>, split across layers 15 and 31 (829,441 tokens each). Synthetic traces are used only where a controlled distribution shift is needed.</dd></div>
+        <div><dt>No migration cost</dt><dd>A cache miss is charged the CXL read but <strong>not</strong> the cost of installing the expert into HBM, nor the eviction write-back. This flatters every adaptive policy &mdash; LRU most of all, since it migrates most often &mdash; and is the single largest correction the model needs.</dd></div>
+        <div><dt>Per-token re-fetch</dt><dd>Each access is charged a full expert transfer. Real inference reads a resident expert's weights at tile granularity without re-fetching, so absolute latencies here are far above a real decode step. Ratios between policies are unaffected; absolute microsecond figures are not comparable to measured inference.</dd></div>
+        <div><dt>Expert size</dt><dd>16&nbsp;MiB is a placeholder for address-space layout. Mixtral's real per-expert FFN is 3 &times; 4096 &times; 14336 &asymp; 176&nbsp;M parameters &mdash; about 336&nbsp;MiB at fp16, roughly 21&times; larger. The configurator lets you substitute it.</dd></div>
+        <div><dt>Top-1 only</dt><dd>The real-trace analysis tracks the first-choice expert. Mixtral routes top-2, so true HBM pressure is higher than modelled and all hit rates here are optimistic.</dd></div>
+        <div><dt>Energy constant</dt><dd>21.08&nbsp;nJ/fetch is DRAMSim3 total energy over request count and includes amortised background power; CXL's 3&times; multiplier is a published PHY ballpark, not a measurement. Relative savings are sound; absolute joules are not.</dd></div>
+        <div><dt>One model family</dt><dd>Everything is Mixtral 8x7B, 8 experts, top-2. Models with 64 or 128 finer-grained experts (DeepSeek-V3, Qwen-MoE) have flatter routing distributions, where cache-based tiering should behave differently. Untested here.</dd></div>
+        <div><dt>Prefetching</dt><dd>The first-order Markov prefetcher is a prototype on two traces. It charges nothing for a wrong prediction, although a wrong prefetch consumes real CXL bandwidth. Treat its numbers as an upper bound.</dd></div>
+      </div>
+
+      <p class="note" style="margin-top:26px">
+        <strong>What would change the conclusion.</strong> Adding a migration penalty proportional to expert
+        size would penalise LRU hardest and could plausibly reverse the layer-15 result, handing it to
+        periodic re-profiling &mdash; whose whole appeal is bounded migration traffic. That experiment is the
+        obvious next one, and it is not yet run.
+      </p>
+    </section>
+
+    <footer>
+      CXL-Based Memory Optimisation for MoE Models &middot; Vedant Kabra, Neil Verma<br>
+      Sources: Mixtral of Experts (Jiang et al., 2024) &middot; Switch Transformer (Fedus et al., 2022) &middot;
+      DRAMSim3 (Li et al., 2020) &middot; CXL 2.0 specification &middot; allenai/analysis_mixtral<br>
+      Figures marked <span class="pill measured" style="font-size:9px">Measured</span> are computed from the recorded trace;
+      <span class="pill modelled" style="font-size:9px">Modelled</span> from published parameters;
+      <span class="pill replay" style="font-size:9px">Calibrated replay</span> is illustrative.
+    </footer>
+
+  </main>
+</div>
+
+<script>
+/* ==================================================================== *
+ * DATA — every array below is lifted verbatim from results/*.csv
+ * ==================================================================== */
+
+// tiering_sweep_results.csv — measured HBM/CXL access split per budget
+const SWEEP = [
+  { k:0, hbm:0,      cxl:100000 },
+  { k:1, hbm:14928,  cxl:85072  },
+  { k:2, hbm:29341,  cxl:70659  },
+  { k:3, hbm:42212,  cxl:57788  },
+  { k:4, hbm:54558,  cxl:45442  },
+  { k:5, hbm:66777,  cxl:33223  },
+  { k:6, hbm:77994,  cxl:22006  },
+  { k:7, hbm:89193,  cxl:10807  },
+  { k:8, hbm:100000, cxl:0      },
+];
+// three_strategy_comparison.csv — LRU hit rate per budget (%)
+const LRU_HIT = [0, 5.332, 26.078, 38.695, 51.212, 63.731, 75.876, 88.051, 99.992];
+
+// smart_vs_random_results.csv
+const SVR = [
+  { k:0, smart:244360.625,    rnd:244360.625,       sd:0,       adv:0     },
+  { k:1, smart:210820.4879,   rnd:216359.17151,     sd:2989.16, adv:2.560 },
+  { k:2, smart:178437.44958,  rnd:188615.64995,     sd:3795.02, adv:5.396 },
+  { k:3, smart:149518.96723,  rnd:158955.05162,     sd:4132.99, adv:5.936 },
+  { k:4, smart:121780.05159,  rnd:132700.25559,     sd:5299.74, adv:8.229 },
+  { k:5, smart:94326.47876,   rnd:104197.54242,     sd:4879.62, adv:9.473 },
+  { k:6, smart:69124.19326,   rnd:76673.42026,      sd:3496.43, adv:9.846 },
+  { k:7, smart:43962.35006,   rnd:48526.26220,      sd:3423.17, adv:9.405 },
+  { k:8, smart:19681.25,      rnd:19681.25,         sd:0,       adv:0     },
+];
+
+// Real Mixtral hit rates (%) — run_real_benchmark.py on layers 15 and 31
+const DEPTH = {
+  l15: { static:57.51, periodic:61.02, lru:64.94 },
+  l31: { static:65.76, periodic:67.26, lru:65.91 },
+};
+
+// hybrid_nonstationary_comparison.csv + reprofile_best_by_phase.csv
+const PHASE = [
+  { phase:0, static:121343.05, lru:129161.89, hybrid:123803.29, periodic:124258.27 },
+  { phase:1, static:130745.88, lru:128948.45, hybrid:124117.84, periodic:121938.45 },
+  { phase:2, static:136452.74, lru:129802.23, hybrid:130914.39, periodic:123988.65 },
+];
+
+// reprofile_interval_sweep.csv
+const INTERVAL = [
+  { n:500,   t:125054.00 }, { n:1000,  t:124012.99 }, { n:2000,  t:123395.12 },
+  { n:5000,  t:124803.11 }, { n:10000, t:128480.37 }, { n:20000, t:132885.95 },
+];
+const BASELINES = { static:129513.90, lru:129304.20, hybrid:126278.50 };
+
+// energy_metrics.csv
+const ENERGY = [
+  { layer:'Layer 15', pol:'static',   hit:57.51, mJ:32.343043, nJ:38.9938 },
+  { layer:'Layer 15', pol:'periodic', hit:61.02, mJ:31.115623, nJ:37.5140 },
+  { layer:'Layer 15', pol:'lru',      hit:64.94, mJ:29.744829, nJ:35.8613 },
+  { layer:'Layer 31', pol:'static',   hit:65.76, mJ:29.458082, nJ:35.5156 },
+  { layer:'Layer 31', pol:'lru',      hit:65.91, mJ:29.405628, nJ:35.4523 },
+  { layer:'Layer 31', pol:'periodic', hit:67.26, mJ:28.933543, nJ:34.8832 },
+];
+
+// robustness_check_summary.csv
+const ROBUST = [
+  { pol:'static',   d1:129513.9, d2:124027.97, r1:4, r2:3 },
+  { pol:'lru',      d1:129304.2, d2:119661.70, r1:3, r2:2 },
+  { pol:'hybrid',   d1:126278.5, d2:132314.89, r1:2, r2:4 },
+  { pol:'periodic', d1:123395.1, d2:97776.06,  r1:1, r2:1 },
+];
+
+const POL = {
+  static:   { label:'Pure Static',       v:'--s1' },
+  lru:      { label:'Pure LRU',          v:'--s2' },
+  periodic: { label:'Periodic re-profile', v:'--s3' },
+  hybrid:   { label:'Hybrid',            v:'--s4' },
+  prefetch: { label:'Markov prefetch',   v:'--s5' },
+};
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const polColor = p => css(POL[p].v);
+
+/* ==================================================================== *
+ * CHART TOOLKIT — plain SVG, redrawn at true pixel size on resize so
+ * labels never shrink below legibility.
+ * ==================================================================== */
+const NS = 'http://www.w3.org/2000/svg';
+const el = (t, a = {}) => { const n = document.createElementNS(NS, t); for (const k in a) n.setAttribute(k, a[k]); return n; };
+const tip = document.getElementById('tip');
+
+function showTip(evt, title, rows) {
+  tip.innerHTML = `<div class="t">${title}</div>` + rows.map(r =>
+    `<div class="r"><i style="background:${r.c}"></i>${r.k}<b>${r.v}</b></div>`).join('');
+  tip.style.opacity = '1';
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = evt.clientX + pad, y = evt.clientY - h - pad;
+  if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+  if (y < 8) y = evt.clientY + pad;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+const hideTip = () => { tip.style.opacity = '0'; };
+
+function niceTicks(min, max, count) {
+  const span = max - min || 1;
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const out = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+
+/** Shared frame: axes, grid, labels. Returns the plot geometry. */
+function frame(svg, W, H, cfg) {
+  const m = { t: 16, r: cfg.padRight ?? 16, b: cfg.xLabel ? 48 : 34, l: cfg.padLeft ?? 60 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const ink2 = css('--ink-2'), muted = css('--muted'), grid = css('--grid'), rule = css('--rule');
+
+  const yTicks = cfg.yTicks || niceTicks(cfg.y0, cfg.y1, 5);
+  const yOf = v => m.t + ph - ((v - cfg.y0) / (cfg.y1 - cfg.y0)) * ph;
+
+  yTicks.forEach(v => {
+    svg.appendChild(el('line', { x1: m.l, x2: m.l + pw, y1: yOf(v), y2: yOf(v), stroke: grid, 'stroke-width': 1 }));
+    const t = el('text', { x: m.l - 9, y: yOf(v) + 4, 'text-anchor': 'end', fill: muted,
+      'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+    t.textContent = cfg.fy ? cfg.fy(v) : v;
+    svg.appendChild(t);
+  });
+  svg.appendChild(el('line', { x1: m.l, x2: m.l + pw, y1: m.t + ph, y2: m.t + ph, stroke: rule, 'stroke-width': 1 }));
+
+  if (cfg.yLabel) {
+    const t = el('text', { x: 12, y: m.t + ph / 2, fill: muted, 'font-size': 10, 'font-family': 'var(--f-mono)',
+      'text-anchor': 'middle', transform: `rotate(-90 12 ${m.t + ph / 2})`, 'letter-spacing': '.1em' });
+    t.textContent = cfg.yLabel.toUpperCase();
+    svg.appendChild(t);
+  }
+  if (cfg.xLabel) {
+    const t = el('text', { x: m.l + pw / 2, y: H - 8, fill: muted, 'font-size': 10,
+      'font-family': 'var(--f-mono)', 'text-anchor': 'middle', 'letter-spacing': '.1em' });
+    t.textContent = cfg.xLabel.toUpperCase();
+    svg.appendChild(t);
+  }
+  return { m, pw, ph, yOf, ink2, muted, grid, rule };
+}
+
+/** Grouped-bar chart. groups:[{label, bars:[{key,val,color}]}] */
+function barChart(host, cfg) {
+  host.innerHTML = '';
+  const W = Math.max(300, host.clientWidth || 640), H = cfg.height || 300;
+  const svg = el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: 'display:block' });
+  const g = frame(svg, W, H, cfg);
+  const n = cfg.groups.length, gw = g.pw / n, inner = gw * 0.76;
+  const bn = cfg.groups[0].bars.length, bw = (inner - 2 * (bn - 1)) / bn; // 2px surface gap
+  const y0 = g.yOf(cfg.y0);
+
+  cfg.groups.forEach((grp, gi) => {
+    const gx = g.m.l + gi * gw + (gw - inner) / 2;
+    grp.bars.forEach((b, bi) => {
+      const x = gx + bi * (bw + 2), y = g.yOf(b.val), h = Math.max(2, y0 - y);
+      const r = Math.min(4, bw / 2);
+      const p = el('path', {
+        d: `M${x} ${y0} L${x} ${y + r} Q${x} ${y} ${x + r} ${y} L${x + bw - r} ${y} Q${x + bw} ${y} ${x + bw} ${y + r} L${x + bw} ${y0} Z`,
+        fill: b.color, style: 'cursor:pointer'
+      });
+      p.addEventListener('pointerenter', e => showTip(e, grp.label,
+        grp.bars.map(bb => ({ c: bb.color, k: bb.key, v: cfg.fv(bb.val) }))));
+      p.addEventListener('pointermove', e => showTip(e, grp.label,
+        grp.bars.map(bb => ({ c: bb.color, k: bb.key, v: cfg.fv(bb.val) }))));
+      p.addEventListener('pointerleave', hideTip);
+      svg.appendChild(p);
+      if (cfg.directLabel) {
+        const t = el('text', { x: x + bw / 2, y: y - 6, 'text-anchor': 'middle', fill: g.ink2,
+          'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+        t.textContent = cfg.fv(b.val); svg.appendChild(t);
+      }
+    });
+    const t = el('text', { x: g.m.l + gi * gw + gw / 2, y: g.m.t + g.ph + 18, 'text-anchor': 'middle',
+      fill: g.muted, 'font-size': 11, 'font-family': 'var(--f-mono)' });
+    t.textContent = grp.label; svg.appendChild(t);
+  });
+  host.appendChild(svg);
+}
+
+/** Line chart. series:[{key,color,pts:[[x,y]],dashed,band:[[x,lo,hi]]}] */
+function lineChart(host, cfg) {
+  host.innerHTML = '';
+  const W = Math.max(300, host.clientWidth || 640), H = cfg.height || 300;
+  const svg = el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: 'display:block' });
+  const g = frame(svg, W, H, cfg);
+  const lg = cfg.logX === true;
+  const xr = lg ? [Math.log10(cfg.x0), Math.log10(cfg.x1)] : [cfg.x0, cfg.x1];
+  const xOf = v => g.m.l + ((lg ? Math.log10(v) : v) - xr[0]) / (xr[1] - xr[0]) * g.pw;
+
+  (cfg.xTicks || []).forEach(v => {
+    const t = el('text', { x: xOf(v), y: g.m.t + g.ph + 18, 'text-anchor': 'middle', fill: g.muted,
+      'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+    t.textContent = cfg.fx ? cfg.fx(v) : v; svg.appendChild(t);
+  });
+
+  (cfg.rules || []).forEach(r => {
+    svg.appendChild(el('line', { x1: g.m.l, x2: g.m.l + g.pw, y1: g.yOf(r.y), y2: g.yOf(r.y),
+      stroke: r.color, 'stroke-width': 2, 'stroke-dasharray': '5 5', opacity: .85 }));
+  });
+
+  cfg.series.forEach(s => {
+    if (s.band) {
+      const up = s.band.map(([x, , hi]) => `${xOf(x)},${g.yOf(hi)}`);
+      const dn = s.band.slice().reverse().map(([x, lo]) => `${xOf(x)},${g.yOf(lo)}`);
+      svg.appendChild(el('polygon', { points: up.concat(dn).join(' '), fill: s.color, opacity: .14 }));
+    }
+    svg.appendChild(el('polyline', {
+      points: s.pts.map(([x, y]) => `${xOf(x)},${g.yOf(y)}`).join(' '),
+      fill: 'none', stroke: s.color, 'stroke-width': 2,
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      ...(s.dashed ? { 'stroke-dasharray': '5 5' } : {})
+    }));
+    s.pts.forEach(([x, y]) => {
+      svg.appendChild(el('circle', { cx: xOf(x), cy: g.yOf(y), r: 4.2, fill: s.color,
+        stroke: css('--surface'), 'stroke-width': 2 }));
+    });
+  });
+
+  // crosshair + shared tooltip keyed to the nearest x
+  const xs = cfg.series[0].pts.map(p => p[0]);
+  const cross = el('line', { y1: g.m.t, y2: g.m.t + g.ph, stroke: g.rule, 'stroke-width': 1, opacity: 0 });
+  svg.appendChild(cross);
+  const hit = el('rect', { x: g.m.l, y: g.m.t, width: g.pw, height: g.ph, fill: 'transparent', style: 'cursor:crosshair' });
+  hit.addEventListener('pointermove', e => {
+    const bx = svg.getBoundingClientRect();
+    const px = (e.clientX - bx.left) * (W / bx.width);
+    let best = xs[0], bd = Infinity;
+    xs.forEach(x => { const d = Math.abs(xOf(x) - px); if (d < bd) { bd = d; best = x; } });
+    cross.setAttribute('x1', xOf(best)); cross.setAttribute('x2', xOf(best)); cross.setAttribute('opacity', 1);
+    showTip(e, cfg.tipTitle(best), cfg.series.map(s => {
+      const p = s.pts.find(q => q[0] === best);
+      return p ? { c: s.color, k: s.key, v: cfg.fv(p[1]) } : null;
+    }).filter(Boolean));
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('opacity', 0); hideTip(); });
+  svg.appendChild(hit);
+  host.appendChild(svg);
+}
+
+/** Dot plot. rows:[{label, dots:[{key,val,color,hollow}]}]
+ *  Position encodes value, so a non-zero axis is legitimate here —
+ *  which is exactly why zoomed comparisons use this and not bars. */
+function dotPlot(host, cfg) {
+  host.innerHTML = '';
+  const W = Math.max(300, host.clientWidth || 640);
+  const rowH = cfg.rowH || 46, labelW = cfg.labelW || 132;
+  const H = rowH * cfg.rows.length + 46;
+  const svg = el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: 'display:block' });
+  const m = { t: 10, r: 18, l: labelW, b: 36 }, pw = W - m.l - m.r;
+  const muted = css('--muted'), grid = css('--grid'), rule = css('--rule'), ink2 = css('--ink-2');
+  const xOf = v => m.l + (v - cfg.x0) / (cfg.x1 - cfg.x0) * pw;
+  const plotH = rowH * cfg.rows.length;
+
+  (cfg.xTicks || niceTicks(cfg.x0, cfg.x1, 5)).forEach(v => {
+    svg.appendChild(el('line', { x1: xOf(v), x2: xOf(v), y1: m.t, y2: m.t + plotH, stroke: grid, 'stroke-width': 1 }));
+    const t = el('text', { x: xOf(v), y: m.t + plotH + 18, 'text-anchor': 'middle', fill: muted,
+      'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+    t.textContent = cfg.fx ? cfg.fx(v) : v; svg.appendChild(t);
+  });
+  if (cfg.xLabel) {
+    const t = el('text', { x: m.l + pw / 2, y: H - 6, 'text-anchor': 'middle', fill: muted,
+      'font-size': 10, 'font-family': 'var(--f-mono)', 'letter-spacing': '.1em' });
+    t.textContent = cfg.xLabel.toUpperCase(); svg.appendChild(t);
+  }
+
+  cfg.rows.forEach((row, ri) => {
+    const y = m.t + ri * rowH + rowH / 2;
+    const vals = row.dots.map(d => d.val);
+    // connector makes the within-row gap the thing you read first
+    svg.appendChild(el('line', { x1: xOf(Math.min(...vals)), x2: xOf(Math.max(...vals)), y1: y, y2: y,
+      stroke: rule, 'stroke-width': 2, 'stroke-linecap': 'round' }));
+    const lb = el('text', { x: m.l - 14, y: y + 4, 'text-anchor': 'end', fill: ink2, 'font-size': 12.5 });
+    lb.textContent = row.label; svg.appendChild(lb);
+
+    row.dots.forEach(d => {
+      const c = el('circle', { cx: xOf(d.val), cy: y, r: 7,
+        fill: d.hollow ? css('--surface') : d.color, stroke: d.color, 'stroke-width': 2.5, style: 'cursor:pointer' });
+      const rows = row.dots.map(dd => ({ c: dd.color, k: dd.key, v: cfg.fv(dd.val) }));
+      c.addEventListener('pointerenter', e => showTip(e, row.label, rows));
+      c.addEventListener('pointermove', e => showTip(e, row.label, rows));
+      c.addEventListener('pointerleave', hideTip);
+      svg.appendChild(c);
+    });
+    if (cfg.directLabel) {
+      row.dots.forEach((d, di) => {
+        const t = el('text', { x: xOf(d.val), y: y - 14, 'text-anchor': 'middle', fill: ink2,
+          'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+        t.textContent = cfg.fv(d.val); svg.appendChild(t);
+      });
+    }
+  });
+  host.appendChild(svg);
+}
+
+function legend(host, items) {
+  host.innerHTML = items.map(i =>
+    `<span><i class="${i.line ? 'line' : ''}" style="background:${i.color}"></i>${i.key}</span>`).join('');
+}
+
+/* Redraw registry — charts re-render at true size on resize / theme flip */
+const DRAWS = [];
+const register = fn => { DRAWS.push(fn); fn(); };
+const redrawAll = () => DRAWS.forEach(f => f());
+let rzT; addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(redrawAll, 140); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(redrawAll, 60));
+new MutationObserver(() => setTimeout(redrawAll, 60))
+  .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+/* ==================================================================== *
+ * 0x10 — CONFIGURATOR
+ * ==================================================================== */
+const SIZES = [
+  { b: 16 * 1048576,  t: '16 MiB'  }, { b: 32 * 1048576,  t: '32 MiB'  },
+  { b: 64 * 1048576,  t: '64 MiB'  }, { b: 128 * 1048576, t: '128 MiB' },
+  { b: 336 * 1048576, t: '336 MiB' }, { b: 672 * 1048576, t: '672 MiB' },
+];
+const $ = id => document.getElementById(id);
+const cfgIn = { hlat: $('c-hlat'), hbw: $('c-hbw'), cadd: $('c-cadd'), cbw: $('c-cbw'), size: $('c-size') };
+const DEFAULTS = { hlat: 150, hbw: 800, cadd: 70, cbw: 64, size: 0 };
+
+const accessNs = (latNs, bwGBs, bytes) => latNs + (bytes / 1073741824) / bwGBs * 1e9;
+const fmtT = ns => ns >= 1000 ? (ns / 1000).toFixed(ns >= 100000 ? 0 : 1) + ' µs' : ns.toFixed(0) + ' ns';
+
+function configState() {
+  const sz = SIZES[+cfgIn.size.value];
+  const tH = accessNs(+cfgIn.hlat.value, +cfgIn.hbw.value, sz.b);
+  const tC = accessNs(+cfgIn.hlat.value + +cfgIn.cadd.value, +cfgIn.cbw.value, sz.b);
+  return { sz, tH, tC };
+}
+
+function drawConfig() {
+  const { sz, tH, tC } = configState();
+  $('c-hlat-rd').textContent = cfgIn.hlat.value + ' ns';
+  $('c-hbw-rd').textContent = cfgIn.hbw.value + ' GB/s';
+  $('c-cadd-rd').textContent = '+' + cfgIn.cadd.value + ' ns';
+  $('c-cbw-rd').textContent = cfgIn.cbw.value + ' GB/s';
+  $('c-size-rd').textContent = sz.t;
+
+  const mix = (hitPct) => (hitPct / 100) * tH + (1 - hitPct / 100) * tC;
+  const smart = SWEEP.map(r => [r.k, mix(r.hbm / 1000)]);
+  const lru   = LRU_HIT.map((h, k) => [k, mix(h)]);
+  const rnd   = SWEEP.map(r => [r.k, mix(r.k / 8 * 100)]);
+
+  $('c-ro-h').textContent = fmtT(tH);
+  $('c-ro-c').textContent = fmtT(tC);
+  $('c-ro-p').textContent = (tC / tH).toFixed(1) + '×';
+  $('c-ro-f').textContent = (4 * sz.b / 1048576) + ' MiB';
+  $('c-ro-s').textContent = ((smart[4][1] / tH - 1) * 100).toFixed(0) + '%';
+
+  const all = [...smart, ...lru, ...rnd].map(p => p[1]);
+  lineChart($('chart-config'), {
+    height: 320, x0: 0, x1: 8, xTicks: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    y0: 0, y1: Math.max(...all) * 1.06,
+    xLabel: 'Experts resident in HBM', yLabel: 'Avg access time',
+    fy: fmtT, fv: fmtT, tipTitle: k => `HBM budget = ${k} of 8`,
+    series: [
+      { key: 'Static (frequency-ranked)', color: css('--s1'), pts: smart },
+      { key: 'LRU (recency)',             color: css('--s2'), pts: lru   },
+      { key: 'Random placement',          color: css('--muted'), pts: rnd, dashed: true },
+    ],
+  });
+  legend($('legend-config'), [
+    { key: 'Static (frequency-ranked)', color: css('--s1'), line: 1 },
+    { key: 'LRU (recency)',             color: css('--s2'), line: 1 },
+    { key: 'Random placement',          color: css('--muted'), line: 1 },
+  ]);
+}
+Object.values(cfgIn).forEach(i => i.addEventListener('input', drawConfig));
+$('c-reset').addEventListener('click', () => {
+  for (const k in DEFAULTS) cfgIn[k].value = DEFAULTS[k];
+  drawConfig();
+});
+register(drawConfig);
+
+/* ==================================================================== *
+ * 0x20 — SMART VS RANDOM
+ * ==================================================================== */
+register(() => {
+  lineChart($('chart-svr'), {
+    height: 300, x0: 0, x1: 8, xTicks: [0, 2, 4, 6, 8],
+    y0: 0, y1: 260000, padLeft: 56,
+    xLabel: 'HBM budget', yLabel: 'Avg access time',
+    fy: fmtT, fv: fmtT, tipTitle: k => `HBM budget = ${k} of 8`,
+    series: [
+      { key: 'Frequency-ranked', color: css('--s1'), pts: SVR.map(r => [r.k, r.smart]) },
+      { key: 'Random (20 draws)', color: css('--muted'), pts: SVR.map(r => [r.k, r.rnd]),
+        dashed: true, band: SVR.map(r => [r.k, r.rnd - r.sd, r.rnd + r.sd]) },
+    ],
+  });
+  legend($('legend-svr'), [
+    { key: 'Frequency-ranked', color: css('--s1'), line: 1 },
+    { key: 'Random, ±1 sd', color: css('--muted'), line: 1 },
+  ]);
+
+  barChart($('chart-adv'), {
+    height: 300, y0: 0, y1: 11, padLeft: 44, xLabel: 'HBM budget',
+    yLabel: 'Advantage', fy: v => v + '%', fv: v => v.toFixed(2) + '%',
+    groups: SVR.map(r => ({ label: String(r.k), bars: [{ key: 'Faster than random', val: r.adv, color: css('--s3') }] })),
+  });
+});
+
+/* ==================================================================== *
+ * 0x30 — DEPTH
+ * ==================================================================== */
+let depthView = 'both';
+function drawDepth() {
+  const order = ['static', 'periodic', 'lru'];
+  const layers = depthView === 'both' ? ['l15', 'l31'] : [depthView];
+  dotPlot($('chart-depth'), {
+    rowH: 54, labelW: 138, x0: 55, x1: 70, xTicks: [55, 58, 61, 64, 67, 70],
+    xLabel: 'HBM hit rate', fx: v => v + '%', fv: v => v.toFixed(2) + '%',
+    directLabel: layers.length === 1,
+    rows: order.map(p => ({
+      label: POL[p].label,
+      dots: layers.map(L => ({
+        key: L === 'l15' ? 'Layer 15' : 'Layer 31',
+        val: DEPTH[L][p], color: polColor(p), hollow: L === 'l31',
+      })),
+    })),
+  });
+  legend($('legend-depth'), layers.map(L => ({
+    key: L === 'l15' ? 'Layer 15 (middle) — filled' : 'Layer 31 (deep) — hollow',
+    color: L === 'l15' ? css('--ink-2') : css('--muted'),
+  })));
+
+  const tb = $('tbody-depth');
+  tb.innerHTML = order.map(p => {
+    const a = DEPTH.l15[p], b = DEPTH.l31[p], d = b - a;
+    const winMid = p === 'lru', winDeep = p === 'periodic';
+    return `<tr><td><i class="cellchip" style="background:${polColor(p)}"></i>${POL[p].label}</td>
+      <td${winMid ? ' style="font-weight:600"' : ''}>${a.toFixed(2)}%</td>
+      <td${winDeep ? ' style="font-weight:600"' : ''}>${b.toFixed(2)}%</td>
+      <td style="color:${d > 0 ? css('--good-ink') : css('--critical')}">${d > 0 ? '+' : ''}${d.toFixed(2)}</td></tr>`;
+  }).join('');
+
+  const v = $('depth-verdict');
+  if (depthView === 'l15') v.innerHTML = '<strong>Layer 15 &rarr; pure LRU.</strong> 64.94%, a 7.43-point lead over static. Reactivity pays when the hot set turns over.';
+  else if (depthView === 'l31') v.innerHTML = '<strong>Layer 31 &rarr; periodic re-profiling.</strong> 67.26%. Static and LRU finish 0.15 points apart &mdash; at this depth, adapting per-access buys essentially nothing.';
+  else v.innerHTML = '<strong>The ordering inverts with depth.</strong> LRU is best at layer 15 and <em>worst</em> at layer 31; static is worst at 15 and competitive at 31. A single fixed policy for the whole stack leaves points on the table at one end or the other.';
+}
+$('depth-toggle').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  depthView = b.dataset.layer;
+  [...e.currentTarget.children].forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+  drawDepth();
+});
+register(drawDepth);
+
+/* ==================================================================== *
+ * 0x40 — PHASE SHIFT
+ * ==================================================================== */
+register(() => {
+  // A trajectory across phases, not bars: the story is each policy's slope
+  // as the distribution rotates away from what it was profiled on.
+  lineChart($('chart-phase'), {
+    height: 320, x0: -0.15, x1: 2.15, xTicks: [0, 1, 2], padLeft: 58,
+    y0: 118000, y1: 139000,
+    xLabel: 'Phase — hot experts rotate at each boundary', yLabel: 'Avg access time',
+    fx: v => 'Phase ' + v, fy: fmtT, fv: fmtT, tipTitle: p => 'Phase ' + p,
+    series: ['static', 'lru', 'hybrid', 'periodic'].map(p => ({
+      key: POL[p].label, color: polColor(p), pts: PHASE.map(r => [r.phase, r[p]]),
+    })),
+  });
+  legend($('legend-phase'), ['static', 'lru', 'hybrid', 'periodic'].map(p => ({ key: POL[p].label, color: polColor(p), line: 1 })));
+});
+
+/* ==================================================================== *
+ * 0x50 — INTERVAL SWEEP
+ * ==================================================================== */
+register(() => {
+  lineChart($('chart-interval'), {
+    height: 310, logX: true, x0: 400, x1: 25000,
+    xTicks: [500, 1000, 2000, 5000, 10000, 20000],
+    y0: 118000, y1: 136000, padLeft: 58,
+    xLabel: 'Tokens between re-ranks', yLabel: 'Overall avg access time',
+    fx: v => v >= 1000 ? (v / 1000) + 'k' : v, fy: fmtT, fv: fmtT,
+    tipTitle: n => `Re-profile every ${n.toLocaleString()} tokens`,
+    rules: [
+      { y: BASELINES.static, color: css('--s1') },
+      { y: BASELINES.lru,    color: css('--s2') },
+      { y: BASELINES.hybrid, color: css('--s4') },
+    ],
+    series: [{ key: 'Periodic re-profile', color: css('--s3'), pts: INTERVAL.map(r => [r.n, r.t]) }],
+  });
+  legend($('legend-interval'), [
+    { key: 'Periodic re-profile', color: css('--s3'), line: 1 },
+    { key: 'Pure static (fixed)', color: css('--s1'), line: 1 },
+    { key: 'Pure LRU (fixed)',    color: css('--s2'), line: 1 },
+    { key: 'Hybrid (fixed)',      color: css('--s4'), line: 1 },
+  ]);
+});
+
+/* ==================================================================== *
+ * 0x60 — ENERGY
+ * ==================================================================== */
+register(() => {
+  const layers = ['Layer 15', 'Layer 31'];
+  barChart($('chart-energy'), {
+    height: 310, y0: 0, y1: 38, padLeft: 52, directLabel: true,
+    yLabel: 'Total energy', fy: v => v.toFixed(0) + ' mJ', fv: v => v.toFixed(2) + ' mJ',
+    groups: layers.map(L => ({
+      label: L, bars: ['static', 'lru', 'periodic'].map(p => {
+        const r = ENERGY.find(e => e.layer === L && e.pol === p);
+        return { key: POL[p].label, val: r.mJ, color: polColor(p) };
+      }),
+    })),
+  });
+  legend($('legend-energy'), ['static', 'lru', 'periodic'].map(p => ({ key: POL[p].label, color: polColor(p) })));
+
+  const worst = {};
+  layers.forEach(L => worst[L] = Math.max(...ENERGY.filter(e => e.layer === L).map(e => e.mJ)));
+  $('tbody-energy').innerHTML = ENERGY.map(r => {
+    const save = (1 - r.mJ / worst[r.layer]) * 100;
+    const best = r.mJ === Math.min(...ENERGY.filter(e => e.layer === r.layer).map(e => e.mJ));
+    return `<tr${best ? ' class="win"' : ''}><td>${r.layer}</td>
+      <td style="text-align:left;font-family:var(--f-body)"><i class="cellchip" style="background:${polColor(r.pol)}"></i>${POL[r.pol].label}</td>
+      <td>${r.hit.toFixed(2)}%</td><td>${r.mJ.toFixed(2)} mJ</td><td>${r.nJ.toFixed(2)} nJ</td>
+      <td style="color:${save > 0 ? css('--good-ink') : css('--muted')}">${save > 0 ? '−' + save.toFixed(2) + '%' : '—'}</td></tr>`;
+  }).join('');
+});
+
+/* ==================================================================== *
+ * 0x70 — ROBUSTNESS
+ * ==================================================================== */
+register(() => {
+  // Slope chart: the question is whether the ORDER holds between datasets,
+  // and crossing lines answer that at a glance in a way bars cannot.
+  lineChart($('chart-robust'), {
+    height: 320, x0: 0.86, x1: 2.14, xTicks: [1, 2], padLeft: 58, padRight: 26,
+    y0: 92000, y1: 137000,
+    yLabel: 'Overall avg access time', fx: v => 'Dataset ' + v, fy: fmtT, fv: fmtT,
+    tipTitle: d => 'Dataset ' + d,
+    series: ROBUST.map(r => ({ key: POL[r.pol].label, color: polColor(r.pol), pts: [[1, r.d1], [2, r.d2]] })),
+  });
+  legend($('legend-robust'), ROBUST.map(r => ({ key: POL[r.pol].label, color: polColor(r.pol), line: 1 })));
+
+  $('tbody-robust').innerHTML = ROBUST.slice().sort((a, b) => a.r1 - b.r1).map(r => {
+    const held = r.r1 === r.r2;
+    return `<tr${r.pol === 'periodic' ? ' class="win"' : ''}>
+      <td><i class="cellchip" style="background:${polColor(r.pol)}"></i>${POL[r.pol].label}</td>
+      <td>${fmtT(r.d1)}</td><td>#${r.r1}</td><td>${fmtT(r.d2)}</td><td>#${r.r2}</td>
+      <td style="text-align:left;font-family:var(--f-body);color:${held ? css('--good-ink') : css('--critical')}">
+        ${held ? 'Rank held' : (r.r2 > r.r1 ? 'Fell ' : 'Rose ') + Math.abs(r.r2 - r.r1)}</td></tr>`;
+  }).join('');
+});
+
+/* ==================================================================== *
+ * 0x00 — THE LIVE ENGINE
+ * ==================================================================== */
+const N_EXPERTS = 8;
+
+/* Seeded PRNG so every viewer sees the identical replay. */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* Trace generators calibrated to the statistics we measured. Each is a
+   skewed base distribution plus a forced-repeat term that reproduces the
+   observed consecutive-repeat rate; the "shift" trace rotates the
+   distribution at phase boundaries, matching nonstationary_experiment.py. */
+function makeTrace(kind, n = 4000) {
+  const rnd = mulberry32(kind === 'l15' ? 1509 : kind === 'l31' ? 3107 : 77);
+  // weights chosen so top-4 share ≈ measured static hit rate for each layer
+  const base = kind === 'l15' ? [.185, .165, .125, .105, .105, .105, .105, .105]
+             : kind === 'l31' ? [.235, .195, .130, .105, .085, .085, .085, .080]
+             : [.260, .190, .140, .105, .085, .080, .075, .065];
+  const pRepeat = kind === 'l15' ? 0.20 : kind === 'l31' ? 0.30 : 0.27;
+  const collision = base.reduce((s, p) => s + p * p, 0);
+  const pForced = Math.max(0, (pRepeat - collision) / (1 - collision));
+  const phaseLen = Math.floor(n / 3);
+
+  const pick = (w) => { let r = rnd(), a = 0; for (let i = 0; i < w.length; i++) { a += w[i]; if (r < a) return i; } return w.length - 1; };
+  const out = []; let prev = 0;
+  for (let t = 0; t < n; t++) {
+    let w = base;
+    if (kind === 'shift') { const ph = Math.min(2, Math.floor(t / phaseLen)); w = base.map((_, i) => base[(i - ph * 2 + 16) % 8]); }
+    const e = (t > 0 && rnd() < pForced) ? prev : pick(w);
+    out.push(e); prev = e;
+  }
+  return out;
+}
+
+/* Policy implementations. Each exposes step(expert) -> true on HBM hit,
+   and resident() -> Set of experts currently in HBM. */
+function makeStatic(k, warmup) {
+  const c = new Array(N_EXPERTS).fill(0);
+  warmup.forEach(e => c[e]++);
+  const top = c.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, k).map(p => p[1]);
+  const set = new Set(top);
+  return { step: e => set.has(e), resident: () => set };
+}
+function makeLRU(k) {
+  let q = [];
+  return {
+    step(e) {
+      const i = q.indexOf(e);
+      if (i >= 0) { q.splice(i, 1); q.push(e); return true; }
+      q.push(e); if (q.length > k) q.shift();
+      return false;
+    },
+    resident: () => new Set(q),
+  };
+}
+function makePeriodic(k, interval) {
+  let set = new Set([...Array(k).keys()]);   // cold start: uninformed default
+  let counts = new Array(N_EXPERTS).fill(0), seen = 0;
+  return {
+    step(e) {
+      const hit = set.has(e);
+      counts[e]++; seen++;
+      if (seen >= interval) {
+        set = new Set(counts.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, k).map(p => p[1]));
+        counts = new Array(N_EXPERTS).fill(0); seen = 0;
+      }
+      return hit;
+    },
+    resident: () => set,
+  };
+}
+function makeHybrid(k, warmup) {
+  const c = new Array(N_EXPERTS).fill(0);
+  warmup.forEach(e => c[e]++);
+  const nRes = Math.max(0, Math.floor(k / 2));
+  const reserved = new Set(c.map((v, i) => [v, i]).sort((a, b) => b[0] - a[0]).slice(0, nRes).map(p => p[1]));
+  const cap = k - nRes;
+  let q = [];
+  return {
+    step(e) {
+      if (reserved.has(e)) return true;
+      const i = q.indexOf(e);
+      if (i >= 0) { q.splice(i, 1); q.push(e); return true; }
+      if (cap > 0) { q.push(e); if (q.length > cap) q.shift(); }
+      return false;
+    },
+    resident: () => new Set([...reserved, ...q]),
+  };
+}
+function makePrefetch(k) {
+  let q = [];
+  const tr = Array.from({ length: N_EXPERTS }, () => new Array(N_EXPERTS).fill(0));
+  let prev = null, guess = null;
+  return {
+    step(e) {
+      let hit = false;
+      const i = q.indexOf(e);
+      if (i >= 0) { q.splice(i, 1); q.push(e); hit = true; }
+      else {
+        if (e === guess) hit = true;            // latency hidden by the prefetch
+        q.push(e); if (q.length > k) q.shift();
+      }
+      if (prev !== null) tr[prev][e]++;
+      // predict the next expert; only worth prefetching if it is not resident.
+      // untrained rows stay silent rather than defaulting to expert 0.
+      let bi = -1, bc = 0;
+      for (let j = 0; j < N_EXPERTS; j++) if (tr[e][j] > bc) { bc = tr[e][j]; bi = j; }
+      guess = (bi >= 0 && !q.includes(bi)) ? bi : null;
+      prev = e;
+      return hit;
+    },
+    resident: () => new Set(q),
+  };
+}
+
+const ENG = {
+  trace: 'l15', shown: 'lru', k: 4, speed: 12,
+  i: 0, playing: true, tokens: [], sims: {}, tape: [], acc: null, timer: null,
+};
+const POL_KEYS = ['static', 'lru', 'periodic', 'hybrid', 'prefetch'];
+
+function engReset() {
+  // The first 400 tokens are the profiling prefix and are NOT replayed, so
+  // static and hybrid never score on tokens they were fitted to.
+  const full = makeTrace(ENG.trace, 4400);
+  const warm = full.slice(0, 400);
+  ENG.tokens = full.slice(400);
+  ENG.sims = {
+    static:   makeStatic(ENG.k, warm),
+    lru:      makeLRU(ENG.k),
+    periodic: makePeriodic(ENG.k, 250),
+    hybrid:   makeHybrid(ENG.k, warm),
+    prefetch: makePrefetch(ENG.k),
+  };
+  ENG.acc = Object.fromEntries(POL_KEYS.map(p => [p, { h: 0, n: 0 }]));
+  ENG.i = 0; ENG.tape = [];
+  buildBlocks();
+  for (let n = 0; n < 200; n++) engStep(false);   // open in a running state
+  engRender();
+}
+
+function engStep(render = true) {
+  if (ENG.i >= ENG.tokens.length) ENG.i = 0;
+  const e = ENG.tokens[ENG.i++];
+  POL_KEYS.forEach(p => {
+    const hit = ENG.sims[p].step(e);
+    ENG.acc[p].n++; if (hit) ENG.acc[p].h++;
+    if (p === ENG.shown) {
+      ENG.tape.push(hit ? 'h' : 'm');
+      if (ENG.tape.length > 64) ENG.tape.shift();
+    }
+  });
+  ENG.last = e;
+  if (render) engRender();
+}
+
+let blocks = [];
+function buildBlocks() {
+  const host = $('eng-blocks');
+  host.innerHTML = '';
+  blocks = [];
+  const freq = new Array(N_EXPERTS).fill(0);
+  ENG.tokens.forEach(e => freq[e]++);
+  for (let i = 0; i < N_EXPERTS; i++) {
+    const d = document.createElement('div');
+    d.className = 'blk';
+    d.innerHTML = `E${i}<span class="pct">${(freq[i] / ENG.tokens.length * 100).toFixed(0)}%</span>`;
+    host.appendChild(d); blocks.push(d);
+  }
+}
+
+function engRender() {
+  const res = ENG.sims[ENG.shown].resident();
+  const rails = $('eng-rails');
+  const W = rails.clientWidth || 640;
+  const colW = Math.min(72, Math.max(36, (W - 16) / N_EXPERTS));
+  const hbmY = 0, cxlY = 84;   // rail-row height 54 + 30 gap
+
+  let hi = 0, ci = 0;
+  for (let i = 0; i < N_EXPERTS; i++) {
+    const b = blocks[i], inHbm = res.has(i);
+    const col = inHbm ? hi++ : ci++;
+    b.style.transform = `translate(${8 + col * colW}px, ${inHbm ? hbmY : cxlY}px)`;
+    b.style.width = (colW - 8) + 'px';
+    b.classList.toggle('in-hbm', inHbm);
+    b.classList.toggle('active', i === ENG.last);
+    b.classList.toggle('fault', i === ENG.last && !inHbm);
+  }
+
+  $('eng-token').textContent = 'token ' + String(ENG.acc.lru.n).padStart(6, '0');
+  $('eng-tape').innerHTML = ENG.tape.map(c => `<i class="${c}"></i>`).join('');
+
+  const a = ENG.acc[ENG.shown], hr = a.n ? a.h / a.n * 100 : 0;
+  const { tH, tC } = configState();
+  const lat = (hr / 100) * tH + (1 - hr / 100) * tC;
+  $('ro-tok').textContent = a.n.toLocaleString();
+  $('ro-hit').textContent = hr.toFixed(1) + '%';
+  $('ro-miss').textContent = (a.n - a.h).toLocaleString();
+  $('ro-lat').textContent = fmtT(lat);
+  $('ro-slow').textContent = (lat / tH).toFixed(1) + '×';
+
+  const best = Math.max(...POL_KEYS.map(p => ENG.acc[p].h / Math.max(1, ENG.acc[p].n)));
+  $('eng-scores').innerHTML = POL_KEYS.map(p => {
+    const r = ENG.acc[p].h / Math.max(1, ENG.acc[p].n);
+    const lead = Math.abs(r - best) < 1e-9;
+    return `<div class="score${lead ? ' lead' : ''}">
+      <div class="nm"><i class="chip" style="background:${polColor(p)}"></i>${POL[p].label}</div>
+      <div class="track"><div class="bar" style="width:${(r * 100).toFixed(1)}%;background:${polColor(p)}"></div></div>
+      <div class="val">${(r * 100).toFixed(1)}%</div></div>`;
+  }).join('');
+
+  $('eng-policy-name').textContent = POL[ENG.shown].label;
+  $('eng-policy-tag').textContent = POL[ENG.shown].label.toLowerCase();
+}
+
+function engTimer() {
+  clearInterval(ENG.timer);
+  if (ENG.playing) ENG.timer = setInterval(() => engStep(), 1000 / ENG.speed);
+}
+
+$('eng-trace').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  ENG.trace = b.dataset.trace;
+  [...e.currentTarget.children].forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+  engReset();
+});
+$('eng-rail').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  ENG.shown = b.dataset.pol;
+  [...e.currentTarget.children].forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+  ENG.tape = []; engRender();
+});
+$('eng-k').addEventListener('input', e => {
+  ENG.k = +e.target.value;
+  $('eng-k-rd').textContent = `${ENG.k} of 8 experts`;
+  engReset();
+});
+$('eng-speed').addEventListener('input', e => {
+  ENG.speed = +e.target.value;
+  $('eng-speed-rd').textContent = `${ENG.speed} tok/s`;
+  engTimer();
+});
+$('eng-play').addEventListener('click', e => {
+  ENG.playing = !ENG.playing;
+  e.target.textContent = ENG.playing ? 'Pause' : 'Play';
+  e.target.classList.toggle('primary', ENG.playing);
+  engTimer();
+});
+$('eng-step').addEventListener('click', () => {
+  ENG.playing = false;
+  $('eng-play').textContent = 'Play'; $('eng-play').classList.remove('primary');
+  engTimer(); engStep();
+});
+$('eng-reset').addEventListener('click', engReset);
+addEventListener('resize', () => { clearTimeout(ENG.rz); ENG.rz = setTimeout(engRender, 140); });
+
+engReset();
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  ENG.playing = false;
+  $('eng-play').textContent = 'Play'; $('eng-play').classList.remove('primary');
+  for (let n = 0; n < 1500; n++) engStep(false);
+  engRender();
+} else {
+  engTimer();
+}
+
+/* ==================================================================== *
+ * Rail nav — mark the section currently in view
+ * ==================================================================== */
+const links = [...document.querySelectorAll('#railnav a')];
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(en => {
+    if (!en.isIntersecting) return;
+    links.forEach(a => a.classList.toggle('is-current', a.getAttribute('href') === '#' + en.target.id));
+  });
+}, { rootMargin: '-15% 0px -70% 0px' });
+document.querySelectorAll('main section').forEach(s => obs.observe(s));
+</script>

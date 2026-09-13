@@ -30,9 +30,14 @@ These are defensible ballpark figures with sources, NOT vendor-exact
 numbers for a specific chip -- call this out explicitly in your report.
 """
 
+import matplotlib
+matplotlib.use("Agg")
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+import paths
 
 # ----------------------------------------------------------------------
 # Memory tier parameters (cited above)
@@ -79,36 +84,48 @@ def assign_tiers(expert_ids_by_popularity, num_experts_in_hbm):
     return tier_map
 
 
-def simulate(trace_df, tier_map):
-    """
-    Walk through every (token, expert) access in the trace and compute
-    the access time based on which tier that expert is currently
-    assigned to. Returns total time and a per-tier breakdown.
-    """
-    expert_cols = [c for c in trace_df.columns if c.startswith("expert_")]
-    total_time_ns = 0.0
-    hbm_accesses = 0
-    cxl_accesses = 0
-    hbm_time_ns = 0.0
-    cxl_time_ns = 0.0
+def expert_columns(trace_df):
+    """The expert-choice columns of a trace, in routing-preference order."""
+    return [c for c in trace_df.columns if c.startswith("expert_")]
 
-    for col in expert_cols:
-        for expert_id in trace_df[col]:
-            tier = tier_map[expert_id]
-            if tier == "HBM":
-                t = access_time_ns(HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
-                hbm_accesses += 1
-                hbm_time_ns += t
-            else:
-                t = access_time_ns(CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
-                cxl_accesses += 1
-                cxl_time_ns += t
-            total_time_ns += t
+
+def access_counts(trace_df, num_experts=None):
+    """
+    Number of accesses to each expert across the whole trace.
+
+    This is the only thing a STATIC tier assignment's cost depends on.
+    A static placement charges every access to the same tier for the
+    whole run, so the total time is a function of per-expert access
+    counts alone -- the order the accesses arrived in cannot change it.
+    Collapsing the trace to eight integers once, instead of re-walking
+    millions of rows for every candidate placement, is what makes the
+    sweeps below cheap. (Order-dependent policies such as LRU cannot use
+    this and still walk the trace; see simulate_lru_cache.)
+    """
+    cols = expert_columns(trace_df)
+    flat = trace_df[cols].to_numpy().ravel()
+    if num_experts is None:
+        num_experts = int(flat.max()) + 1
+    return np.bincount(flat, minlength=num_experts)
+
+
+def _simulate_from_counts(counts, tier_map):
+    """Shared core of simulate(): cost a static placement from counts."""
+    t_hbm = access_time_ns(HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
+    t_cxl = access_time_ns(CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
+
+    hbm_accesses = int(sum(c for e, c in enumerate(counts) if tier_map.get(e) == "HBM"))
+    cxl_accesses = int(counts.sum()) - hbm_accesses
+
+    hbm_time_ns = hbm_accesses * t_hbm
+    cxl_time_ns = cxl_accesses * t_cxl
+    total_time_ns = hbm_time_ns + cxl_time_ns
+    total_accesses = hbm_accesses + cxl_accesses
 
     return {
         "total_time_ns": total_time_ns,
-        "total_accesses": hbm_accesses + cxl_accesses,
-        "avg_time_per_access_ns": total_time_ns / (hbm_accesses + cxl_accesses),
+        "total_accesses": total_accesses,
+        "avg_time_per_access_ns": total_time_ns / total_accesses,
         "hbm_accesses": hbm_accesses,
         "cxl_accesses": cxl_accesses,
         "hbm_time_ns": hbm_time_ns,
@@ -116,26 +133,62 @@ def simulate(trace_df, tier_map):
     }
 
 
-def sweep_hbm_capacity(trace_df, num_experts):
+def simulate(trace_df, tier_map):
+    """
+    Total access time for a fixed (static) HBM/CXL assignment over the
+    whole trace, with a per-tier breakdown.
+
+    Numerically identical to walking the trace access by access -- see
+    access_counts() for why the walk is unnecessary here.
+    """
+    return _simulate_from_counts(access_counts(trace_df, len(tier_map)), tier_map)
+
+
+def rank_experts(trace_df, num_experts, by="first"):
+    """
+    Rank experts hottest-first for static placement.
+
+    by="first" : rank on first-choice (top-1) selections only.
+    by="all"   : rank on ALL accesses, including second-choice ones.
+
+    "first" is the default because it is what produced every number in
+    results/ and in the report, and changing it would silently invalidate
+    them. It is, however, the less principled of the two: the simulator
+    charges for second-choice accesses but this ranking ignores them, so
+    an expert that is rarely first but often second can be sent to CXL
+    despite carrying real traffic. Re-run the pipeline with by="all" to
+    see the difference; expect the gap to widen as top_k grows.
+    """
+    if by == "all":
+        counts = access_counts(trace_df, num_experts)
+        ranked = list(np.argsort(-counts, kind="stable"))
+    elif by == "first":
+        first_col = expert_columns(trace_df)[0]
+        ranked = trace_df[first_col].value_counts().index.tolist()
+    else:
+        raise ValueError(f"rank_experts: unknown by={by!r} (use 'first' or 'all')")
+
+    # Experts that never appear still need a place in the ordering
+    for e in range(num_experts):
+        if e not in ranked:
+            ranked.append(e)
+    return [int(e) for e in ranked]
+
+
+def sweep_hbm_capacity(trace_df, num_experts, rank_by="first"):
     """
     Run the simulation once for every possible number of experts kept
     in HBM (from 0 = everything in CXL, to num_experts = everything in
     HBM, matching the original HBM-only baseline). Returns a DataFrame
     of results for plotting.
     """
-    # Rank experts by how often they were the FIRST choice (hottest first)
-    expert_cols = [c for c in trace_df.columns if c.startswith("expert_")]
-    first_choice_counts = trace_df[expert_cols[0]].value_counts()
-    ranked_experts = first_choice_counts.index.tolist()
-    # Ensure every expert appears even if it never got picked as first choice
-    for e in range(num_experts):
-        if e not in ranked_experts:
-            ranked_experts.append(e)
+    ranked_experts = rank_experts(trace_df, num_experts, by=rank_by)
+    counts = access_counts(trace_df, num_experts)
 
     results = []
     for k in range(num_experts + 1):  # k = number of experts kept in HBM
         tier_map = assign_tiers(ranked_experts, k)
-        stats = simulate(trace_df, tier_map)
+        stats = _simulate_from_counts(counts, tier_map)
         stats["num_experts_in_hbm"] = k
         results.append(stats)
 
@@ -166,7 +219,7 @@ def plot_sweep(results_df, out_path):
     plt.savefig(out_path, dpi=150)
 
 
-def compare_smart_vs_random(trace_df, num_experts, num_random_trials=20, seed=42):
+def compare_smart_vs_random(trace_df, num_experts, num_random_trials=20, seed=42, rank_by="first"):
     """
     THE ACTUAL TEST OF WHETHER TIERING STRATEGY MATTERS.
 
@@ -183,14 +236,14 @@ def compare_smart_vs_random(trace_df, num_experts, num_random_trials=20, seed=42
     averaged, since a single random draw could get lucky or unlucky.
     """
     rng = np.random.default_rng(seed)
-    expert_cols = [c for c in trace_df.columns if c.startswith("expert_")]
 
     # Smart ranking: hottest first, based on actual observed frequency
-    first_choice_counts = trace_df[expert_cols[0]].value_counts()
-    ranked_experts = first_choice_counts.index.tolist()
-    for e in range(num_experts):
-        if e not in ranked_experts:
-            ranked_experts.append(e)
+    ranked_experts = rank_experts(trace_df, num_experts, by=rank_by)
+
+    # Collapse the trace ONCE. Every placement below is static, so all
+    # 189 simulations (9 budgets x (1 smart + 20 random)) read these same
+    # eight integers instead of re-walking the trace each time.
+    counts = access_counts(trace_df, num_experts)
 
     all_experts = list(range(num_experts))
     results = []
@@ -198,14 +251,14 @@ def compare_smart_vs_random(trace_df, num_experts, num_random_trials=20, seed=42
     for k in range(num_experts + 1):
         # Smart: top-k hottest experts in HBM
         smart_tier_map = assign_tiers(ranked_experts, k)
-        smart_stats = simulate(trace_df, smart_tier_map)
+        smart_stats = _simulate_from_counts(counts, smart_tier_map)
 
         # Random: average over several random k-sized HBM subsets
         random_avg_times = []
         for trial in range(num_random_trials):
             random_hbm_set = set(rng.choice(all_experts, size=k, replace=False)) if k > 0 else set()
             random_tier_map = {e: ("HBM" if e in random_hbm_set else "CXL") for e in all_experts}
-            random_stats = simulate(trace_df, random_tier_map)
+            random_stats = _simulate_from_counts(counts, random_tier_map)
             random_avg_times.append(random_stats["avg_time_per_access_ns"])
 
         random_mean = float(np.mean(random_avg_times))
@@ -278,32 +331,30 @@ def simulate_lru_cache(trace_df, capacity_k):
     from collections import OrderedDict
 
     cache = OrderedDict()  # acts as our LRU structure: front = most recently used
-    total_time_ns = 0.0
     hits = 0
     misses = 0
 
-    expert_cols = [c for c in trace_df.columns if c.startswith("expert_")]
+    t_hbm = access_time_ns(HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
+    t_cxl = access_time_ns(CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
 
     # Walk the trace in TRUE chronological order: for each token, visit
-    # its experts in the order they were chosen (expert_1, then expert_2)
-    for row in trace_df[expert_cols].itertuples(index=False):
-        for expert_id in row:
-            if expert_id in cache:
-                # HBM hit -- already resident, and it becomes "most recent"
-                cache.move_to_end(expert_id)
-                t = access_time_ns(HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
-                hits += 1
-            else:
-                # CXL miss -- fetch from CXL, then install into the cache
-                t = access_time_ns(CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
-                misses += 1
-                cache[expert_id] = True
-                if len(cache) > capacity_k:
-                    cache.popitem(last=False)  # evict least-recently-used (front of the dict)
-
-            total_time_ns += t
+    # its experts in the order they were chosen (expert_1, then expert_2).
+    # Flattening to a plain Python list first is a few times faster than
+    # itertuples and keeps the loop body doing only cache work.
+    for expert_id in access_sequence(trace_df):
+        if expert_id in cache:
+            # HBM hit -- already resident, and it becomes "most recent"
+            cache.move_to_end(expert_id)
+            hits += 1
+        else:
+            # CXL miss -- fetch from CXL, then install into the cache
+            misses += 1
+            cache[expert_id] = True
+            if len(cache) > capacity_k:
+                cache.popitem(last=False)  # evict least-recently-used (front of the dict)
 
     total_accesses = hits + misses
+    total_time_ns = hits * t_hbm + misses * t_cxl
     return {
         "avg_time_per_access_ns": total_time_ns / total_accesses,
         "hit_rate_pct": hits / total_accesses * 100,
@@ -312,7 +363,50 @@ def simulate_lru_cache(trace_df, capacity_k):
     }
 
 
-def compare_three_strategies(trace_df, num_experts, num_random_trials=20, seed=42):
+def access_sequence(trace_df):
+    """
+    The trace flattened into one chronological list of expert accesses:
+    for each token, expert_1 then expert_2, and so on.
+    """
+    return trace_df[expert_columns(trace_df)].to_numpy().ravel().tolist()
+
+
+def lru_hit_rates_all_k(trace_df, num_experts):
+    """
+    LRU hit rate at EVERY capacity from 0..num_experts, in a single pass
+    over the trace.
+
+    LRU is a stack algorithm (Mattson et al., 1970): the set resident at
+    capacity k is always a subset of the set resident at capacity k+1.
+    That means an access is a hit at capacity k if and only if its
+    *stack distance* -- the number of distinct experts touched since the
+    last access to this one -- is strictly less than k. So one pass that
+    records the stack-distance histogram gives the hit rate for every
+    capacity at once, instead of re-running the whole trace once per
+    capacity.
+
+    Returns a numpy array of hit rates in percent, indexed by capacity.
+    """
+    stack = []                                  # most-recently-used first
+    dist_hist = np.zeros(num_experts + 1, dtype=np.int64)  # last bin = cold miss
+    total = 0
+
+    for expert_id in access_sequence(trace_df):
+        total += 1
+        try:
+            d = stack.index(expert_id)          # stack distance
+            stack.pop(d)
+        except ValueError:
+            d = num_experts                     # never seen before: compulsory miss
+        dist_hist[d] += 1
+        stack.insert(0, expert_id)
+
+    # hits at capacity k = accesses whose stack distance was < k
+    hits_at_k = np.concatenate(([0], np.cumsum(dist_hist[:num_experts])))
+    return hits_at_k / total * 100.0
+
+
+def compare_three_strategies(trace_df, num_experts, num_random_trials=20, seed=42, rank_by="first"):
     """
     Compare all three placement strategies at every possible capacity
     budget k:
@@ -320,17 +414,18 @@ def compare_three_strategies(trace_df, num_experts, num_random_trials=20, seed=4
       2. Static Smart -- fixed hot/cold split by overall frequency
       3. LRU (dynamic) -- adapts continuously based on recency
     """
-    static_random_df = compare_smart_vs_random(trace_df, num_experts, num_random_trials, seed)
+    static_random_df = compare_smart_vs_random(trace_df, num_experts, num_random_trials, seed, rank_by)
 
-    lru_results = []
-    for k in range(num_experts + 1):
-        lru_stats = simulate_lru_cache(trace_df, k)
-        lru_results.append({
-            "num_experts_in_hbm": k,
-            "lru_avg_time_ns": lru_stats["avg_time_per_access_ns"],
-            "lru_hit_rate_pct": lru_stats["hit_rate_pct"],
-        })
-    lru_df = pd.DataFrame(lru_results)
+    # One stack-distance pass covers every capacity (see lru_hit_rates_all_k)
+    hit_rates = lru_hit_rates_all_k(trace_df, num_experts)
+    t_hbm = access_time_ns(HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
+    t_cxl = access_time_ns(CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES)
+
+    lru_df = pd.DataFrame({
+        "num_experts_in_hbm": range(num_experts + 1),
+        "lru_avg_time_ns": (hit_rates / 100.0) * t_hbm + (1 - hit_rates / 100.0) * t_cxl,
+        "lru_hit_rate_pct": hit_rates,
+    })
 
     combined = static_random_df.merge(lru_df, on="num_experts_in_hbm")
     return combined
@@ -365,7 +460,7 @@ def plot_three_strategies(combined_df, out_path):
 
 
 if __name__ == "__main__":
-    trace_df = pd.read_csv("expert_trace.csv")
+    trace_df = pd.read_csv(paths.require_data("expert_trace.csv"))
     num_experts = 8  # matches our generator's NUM_EXPERTS
 
     # --- Baseline comparison: HBM-only vs. an example tiered split ---
@@ -374,11 +469,7 @@ if __name__ == "__main__":
     hbm_only_stats = simulate(trace_df, hbm_only_tier_map)
 
     example_k = 4  # keep 4 hottest experts in HBM, 4 coldest in CXL
-    expert_cols = [c for c in trace_df.columns if c.startswith("expert_")]
-    ranked = trace_df[expert_cols[0]].value_counts().index.tolist()
-    for e in all_experts:
-        if e not in ranked:
-            ranked.append(e)
+    ranked = rank_experts(trace_df, num_experts)
     tiered_map = assign_tiers(ranked, example_k)
     tiered_stats = simulate(trace_df, tiered_map)
 
@@ -397,26 +488,27 @@ if __name__ == "__main__":
 
     # --- Full sweep across every possible HBM/CXL split ---
     results_df = sweep_hbm_capacity(trace_df, num_experts)
-    results_df.to_csv("tiering_sweep_results.csv", index=False)
-    plot_sweep(results_df, "tiering_sweep.png")
-
-    print("\nWrote: tiering_sweep_results.csv, tiering_sweep.png")
+    results_df.to_csv(paths.result("tiering_sweep_results.csv"), index=False)
+    plot_sweep(results_df, paths.result("tiering_sweep.png"))
 
     # --- THE ACTUAL TEST: does smart (hot/cold) placement beat random? ---
     comparison_df = compare_smart_vs_random(trace_df, num_experts, num_random_trials=20)
-    comparison_df.to_csv("smart_vs_random_results.csv", index=False)
-    plot_smart_vs_random(comparison_df, "smart_vs_random.png")
+    comparison_df.to_csv(paths.result("smart_vs_random_results.csv"), index=False)
+    plot_smart_vs_random(comparison_df, paths.result("smart_vs_random.png"))
 
     print("\n=== Smart (hot/cold) vs Random placement, same HBM budget ===")
     print(comparison_df.to_string(index=False))
-    print("\nWrote: smart_vs_random_results.csv, smart_vs_random.png")
 
     # --- STRETCH: does a dynamic, recency-aware LRU cache beat both? ---
     combined_df = compare_three_strategies(trace_df, num_experts, num_random_trials=20)
-    combined_df.to_csv("three_strategy_comparison.csv", index=False)
-    plot_three_strategies(combined_df, "three_strategy_comparison.png")
+    combined_df.to_csv(paths.result("three_strategy_comparison.csv"), index=False)
+    plot_three_strategies(combined_df, paths.result("three_strategy_comparison.png"))
 
     print("\n=== Random vs Static-Smart vs LRU (dynamic), same HBM budget ===")
     print(combined_df[["num_experts_in_hbm", "random_avg_time_ns_mean",
                         "smart_avg_time_ns", "lru_avg_time_ns", "lru_hit_rate_pct"]].to_string(index=False))
-    print("\nWrote: three_strategy_comparison.csv, three_strategy_comparison.png")
+
+    print(f"\nWrote into {paths.RESULTS_DIR}:"
+          f"\n       tiering_sweep_results.csv / .png"
+          f"\n       smart_vs_random_results.csv / .png"
+          f"\n       three_strategy_comparison.csv / .png")

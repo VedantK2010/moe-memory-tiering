@@ -25,11 +25,15 @@ We test this hybrid two ways:
      Phase-1/2 collapse, beating both pure strategies overall.
 """
 
+import matplotlib
+matplotlib.use("Agg")
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 
+import paths
 from tier_simulator import (
     access_time_ns, HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS,
     CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, EXPERT_SIZE_BYTES,
@@ -176,16 +180,16 @@ if __name__ == "__main__":
     CAPACITY_K = 4
 
     # --- Experiment 1: best static/LRU split on the STATIONARY trace ---
-    stationary_df = pd.read_csv("expert_trace.csv")
+    stationary_df = pd.read_csv(paths.require_data("expert_trace.csv"))
     split_results = sweep_hybrid_split(stationary_df, NUM_EXPERTS, CAPACITY_K)
-    split_results.to_csv("hybrid_split_sweep.csv", index=False)
-    plot_split_sweep(split_results, "hybrid_split_sweep.png")
+    split_results.to_csv(paths.result("hybrid_split_sweep.csv"), index=False)
+    plot_split_sweep(split_results, paths.result("hybrid_split_sweep.png"))
 
     print("=== Hybrid split sweep (stationary trace, HBM budget = 4) ===")
     print(split_results.to_string(index=False))
 
     # --- Experiment 2: hybrid vs pure static vs pure LRU on the NON-STATIONARY trace ---
-    nonstationary_df = pd.read_csv("nonstationary_trace.csv")
+    nonstationary_df = pd.read_csv(paths.require_data("nonstationary_trace.csv"))
     counts = nonstationary_df[nonstationary_df["phase"] == 0]["expert_1"].value_counts()
     ranked_from_phase0 = counts.index.tolist()
     for e in range(NUM_EXPERTS):
@@ -213,9 +217,11 @@ if __name__ == "__main__":
         hybrid_phase_results.rename(columns={"avg_time_ns": "avg_time_ns_hybrid"}), on="phase"
     )
     print(combined.to_string(index=False))
-    combined.to_csv("hybrid_nonstationary_comparison.csv", index=False)
+    combined.to_csv(paths.result("hybrid_nonstationary_comparison.csv"), index=False)
 
     plot_phase_three_way(static_phase_results, lru_phase_results, hybrid_phase_results,
-                          "hybrid_nonstationary_comparison.png")
+                          paths.result("hybrid_nonstationary_comparison.png"))
 
-    print("\nWrote: hybrid_split_sweep.csv/.png, hybrid_nonstationary_comparison.csv/.png")
+    print(f"\nWrote into {paths.RESULTS_DIR}:"
+          f"\n       hybrid_split_sweep.csv/.png"
+          f"\n       hybrid_nonstationary_comparison.csv/.png")
