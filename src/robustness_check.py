@@ -1,129 +1,100 @@
 """
-Robustness Check: Second Dataset
-===================================
-Every result so far rests on ONE random trace (seed=42/7, skew alpha=6).
-This script regenerates a completely independent dataset -- different
-random seed AND a different skew strength (more extreme hot/cold split)
--- and re-runs the same four-strategy comparison, to check whether the
-ranking of strategies (Periodic Re-profile > Hybrid > LRU ~ Static)
-holds up, or was specific to the first dataset's particular randomness.
+Experiment 3: Does the Strategy Ranking Hold on a Second Dataset?
+==================================================================
+Every phased result rests on one trace with one seed and one skew strength.
+This re-runs the identical four-strategy comparison on an independently
+generated dataset (different seed AND stronger hot/cold skew) and asks
+whether the ORDER of the strategies survives.
+
+BOTH datasets are recomputed here. The original version hardcoded dataset 1's
+numbers as literals, so the comparison could silently drift out of date the
+moment anything upstream changed.
+
+HONESTY NOTE: if the ranking changes, that IS the result. A policy ordering
+that flips when you change the skew of the workload is direct evidence for
+the "no single policy wins everywhere" thesis -- it is a finding, not a
+failure, and it should be reported as one.
+
+Outputs:
+  results/robustness_check.csv
+  results/robustness_check.png
 """
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
-from nonstationary_experiment import (
-    generate_nonstationary_trace, static_placement_from_first_phase,
-    simulate_static_by_phase, simulate_lru_by_phase,
+from config import (
+    DATA_DIR, RESULTS_DIR, ENCODING, NUM_EXPERTS, CAPACITY_K,
+    DATASET2_SKEW_ALPHA, SYNTH_SKEW_ALPHA, REPROFILE_INTERVALS,
 )
-from hybrid_strategy import simulate_hybrid_by_phase
-from periodic_reprofile import simulate_periodic_reprofile
-
-NUM_EXPERTS = 8
-TOP_K = 2
-CAPACITY_K = 4
-TOKENS_PER_PHASE = 20_000
-NUM_PHASES = 3
-
-# Deliberately different from the original dataset:
-#   - different seed (99 instead of 7)
-#   - stronger skew (alpha=3 instead of 6 -> more extreme hot/cold split,
-#     since LOWER Dirichlet alpha = MORE skew)
-NEW_SEED = 99
-NEW_SKEW_ALPHA = 3
-NEW_P_REPEAT = 0.20  # also test a different locality strength (Mixtral's
-                      # layer-0 number was closer to random, ~14%; we pick
-                      # a moderate middle value here, distinct from the
-                      # 0.27 used before)
+import tier_simulator as ts
+from nonstationary_experiment import run_phase_comparison
 
 
-def generate_nonstationary_trace_custom(num_experts, top_k, tokens_per_phase, num_phases,
-                                         p_repeat_target, seed, skew_alpha):
-    """Same logic as generate_nonstationary_trace, but with a configurable
-    skew_alpha so we can test a differently-shaped hot/cold distribution."""
-    rng = np.random.default_rng(seed)
-    all_rows, phase_labels, phase_base_probs = [], [], []
+def evaluate(trace_df, capacity_k, num_experts):
+    interval_scores = {
+        iv: ts.simulate_periodic(trace_df, capacity_k, iv, num_experts)["hit_rate_pct"]
+        for iv in REPROFILE_INTERVALS
+    }
+    best_interval = max(interval_scores, key=interval_scores.get)
+    _, overall, _ = run_phase_comparison(trace_df, capacity_k, num_experts, best_interval)
+    return overall, best_interval
 
-    base_shape = rng.dirichlet(alpha=[skew_alpha] * num_experts)
-    roll_amount = max(1, num_experts // num_phases)
 
-    prev_first = None
-    for phase in range(num_phases):
-        base_probs = np.roll(base_shape, shift=phase * roll_amount)
-        phase_base_probs.append(base_probs)
-        collision_prob = float(np.sum(base_probs ** 2))
-        p_forced = max(0.0, (p_repeat_target - collision_prob) / (1 - collision_prob))
+def main():
+    ds1 = pd.read_csv(DATA_DIR / "nonstationary_trace.csv")
+    ds2 = pd.read_csv(DATA_DIR / "dataset2_trace.csv")
 
-        if prev_first is None:
-            prev_first = int(rng.choice(num_experts, p=base_probs))
+    o1, iv1 = evaluate(ds1, CAPACITY_K, NUM_EXPERTS)
+    o2, iv2 = evaluate(ds2, CAPACITY_K, NUM_EXPERTS)
 
-        for _ in range(tokens_per_phase):
-            if rng.random() < p_forced:
-                first = prev_first
-            else:
-                first = int(rng.choice(num_experts, p=base_probs))
-            remaining = [e for e in range(num_experts) if e != first]
-            remaining_probs = base_probs[remaining] / base_probs[remaining].sum()
-            rest = rng.choice(remaining, size=top_k - 1, replace=False, p=remaining_probs)
-            all_rows.append([first] + list(rest))
-            phase_labels.append(phase)
-            prev_first = first
+    strategies = ["static", "lru", "hybrid", "periodic"]
+    df = pd.DataFrame({
+        "strategy": [s.capitalize() for s in strategies],
+        "dataset1_hit_rate_pct": [o1[f"{s}_overall_pct"] for s in strategies],
+        "dataset2_hit_rate_pct": [o2[f"{s}_overall_pct"] for s in strategies],
+    })
+    # Rank 1 = best (highest hit rate)
+    df["dataset1_rank"] = df["dataset1_hit_rate_pct"].rank(ascending=False).astype(int)
+    df["dataset2_rank"] = df["dataset2_hit_rate_pct"].rank(ascending=False).astype(int)
+    df.to_csv(RESULTS_DIR / "robustness_check.csv", index=False, encoding=ENCODING)
 
-    df = pd.DataFrame(all_rows, columns=[f"expert_{i+1}" for i in range(top_k)])
-    df.insert(0, "token_id", np.arange(len(df)))
-    df["phase"] = phase_labels
-    return df, phase_base_probs
+    print(f"Dataset 1: alpha={SYNTH_SKEW_ALPHA} (milder skew), best periodic interval {iv1:,}")
+    print(f"Dataset 2: alpha={DATASET2_SKEW_ALPHA} (stronger skew), best periodic interval {iv2:,}")
+    print("\n=== Strategy ranking across two independent datasets ===")
+    print(df.to_string(index=False, float_format=lambda v: f"{v:9.2f}"))
+
+    identical = bool((df["dataset1_rank"] == df["dataset2_rank"]).all())
+    if identical:
+        print("\n--> Ranking is IDENTICAL across both datasets. The ordering is robust.")
+    else:
+        print("\n--> Ranking CHANGED between datasets. Report this: it is evidence that")
+        print("    the best policy depends on workload skew, which is the central claim")
+        print("    of this study. Movements:")
+        for _, r in df.iterrows():
+            if r["dataset1_rank"] != r["dataset2_rank"]:
+                print(f"      {r['strategy']:<10} rank {r['dataset1_rank']} -> {r['dataset2_rank']}")
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    x = np.arange(len(df))
+    width = 0.38
+    ax.bar(x - width / 2, df["dataset1_hit_rate_pct"], width,
+           label=f"Dataset 1 (alpha={SYNTH_SKEW_ALPHA})", color="#4C72B0")
+    ax.bar(x + width / 2, df["dataset2_hit_rate_pct"], width,
+           label=f"Dataset 2 (alpha={DATASET2_SKEW_ALPHA}, stronger skew)", color="#DD8452")
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["strategy"])
+    ax.set_ylabel("Overall HBM hit rate (%)")
+    ax.set_title("Strategy ranking across two independent datasets")
+    ax.legend()
+    ax.grid(alpha=0.3, axis="y")
+    plt.tight_layout()
+    plt.savefig(RESULTS_DIR / "robustness_check.png", dpi=150)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
-    trace_df, phase_probs = generate_nonstationary_trace_custom(
-        NUM_EXPERTS, TOP_K, TOKENS_PER_PHASE, NUM_PHASES, NEW_P_REPEAT, NEW_SEED, NEW_SKEW_ALPHA
-    )
-    trace_df.to_csv("dataset2_trace.csv", index=False)
-
-    print("Dataset 2: hottest expert per phase")
-    for i, probs in enumerate(phase_probs):
-        print(f"  Phase {i}: hottest = expert {int(np.argmax(probs))}, "
-              f"max share = {probs.max():.3f} (dataset 1 used alpha=6, this uses alpha={NEW_SKEW_ALPHA})")
-
-    # --- Pure Static ---
-    tier_map = static_placement_from_first_phase(trace_df, NUM_EXPERTS, CAPACITY_K)
-    static_phase = simulate_static_by_phase(trace_df, tier_map)
-
-    # --- Pure LRU ---
-    lru_phase = simulate_lru_by_phase(trace_df, CAPACITY_K)
-
-    # --- Hybrid (half reserved, half LRU) ---
-    counts = trace_df[trace_df["phase"] == 0]["expert_1"].value_counts()
-    ranked_from_phase0 = counts.index.tolist()
-    for e in range(NUM_EXPERTS):
-        if e not in ranked_from_phase0:
-            ranked_from_phase0.append(e)
-    hybrid_phase = simulate_hybrid_by_phase(trace_df, CAPACITY_K, CAPACITY_K // 2, ranked_from_phase0)
-
-    # --- Periodic Re-profile (using the winning interval from dataset 1: 2000) ---
-    reprofile_df = simulate_periodic_reprofile(trace_df, CAPACITY_K, NUM_EXPERTS, 2000)
-    reprofile_phase = reprofile_df.groupby("phase")["avg_time_ns"].mean().reset_index()
-
-    # --- Combine and compare overall averages ---
-    static_overall = static_phase["avg_time_ns"].mean()
-    lru_overall = lru_phase["avg_time_ns"].mean()
-    hybrid_overall = hybrid_phase["avg_time_ns"].mean()
-    reprofile_overall = reprofile_phase["avg_time_ns"].mean()
-
-    summary = pd.DataFrame({
-        "strategy": ["Pure Static", "Pure LRU", "Hybrid", "Periodic Re-profile"],
-        "dataset1_overall_ns": [129513.9, 129304.2, 126278.5, 123395.1],
-        "dataset2_overall_ns": [static_overall, lru_overall, hybrid_overall, reprofile_overall],
-    })
-    summary["dataset1_rank"] = summary["dataset1_overall_ns"].rank().astype(int)
-    summary["dataset2_rank"] = summary["dataset2_overall_ns"].rank().astype(int)
-    summary.to_csv("robustness_check_summary.csv", index=False)
-
-    print("\n=== Robustness check: strategy ranking across two independent datasets ===")
-    print(summary.to_string(index=False))
-
-    if (summary["dataset1_rank"] == summary["dataset2_rank"]).all():
-        print("\n--> Strategy ranking is IDENTICAL across both datasets. Result is robust.")
-    else:
-        print("\n--> Strategy ranking CHANGED between datasets -- worth investigating which part is sensitive.")
+    main()

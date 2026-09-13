@@ -1,0 +1,5 @@
+config: configs/HBM2_8Gb_x128.ini
+cycles: 271000
+trace: data/dramsim3_loaded.txt (256,000 READs, 1/cycle)
+command: ./dramsim3main ../configs/HBM2_8Gb_x128.ini -c 271000 -t dramsim3_loaded.txt -o <out>
+DRAMsim3 commit: 2981759

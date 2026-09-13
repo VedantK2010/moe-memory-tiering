@@ -1,0 +1,5 @@
+config: configs/DDR4_8Gb_x8_3200.ini
+cycles: 1250000
+trace: data/dramsim3_loaded.txt (256,000 READs, 1/cycle)
+command: ./dramsim3main ../configs/DDR4_8Gb_x8_3200.ini -c 1250000 -t dramsim3_loaded.txt -o <out>
+DRAMsim3 commit: 2981759
