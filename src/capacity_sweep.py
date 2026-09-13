@@ -13,8 +13,7 @@ Holding the capacity budget fixed and varying only WHICH experts are
 resident isolates the placement decision itself.
 
 Outputs:
-  results/capacity_sweep.csv
-  results/strategy_comparison.csv
+  results/capacity_sweep.csv          (both figures below are drawn from it)
   results/capacity_sweep.png
   results/strategy_comparison.png
 """
@@ -116,7 +115,6 @@ def main():
     trace = pd.read_csv(DATA_DIR / "expert_trace.csv")
     df = run(trace)
     df.to_csv(RESULTS_DIR / "capacity_sweep.csv", index=False, encoding=ENCODING)
-    df.to_csv(RESULTS_DIR / "strategy_comparison.csv", index=False, encoding=ENCODING)
     plot(df, RESULTS_DIR / "capacity_sweep.png", RESULTS_DIR / "strategy_comparison.png")
 
     print("=== Capacity sweep (stationary trace) ===")

@@ -41,7 +41,7 @@ import matplotlib.pyplot as plt
 
 from config import (
     RESULTS_DIR, ENCODING, NUM_EXPERTS, CAPACITY_K, REAL_TRACES,
-    MIGRATION_WRITE_NS, HBM_TIME_NS, CXL_TIME_NS,
+    MIGRATION_WRITE_NS, HBM_TIME_NS, CXL_TIME_NS, REAL_WARMUP_TOKENS,
 )
 import tier_simulator as ts
 
@@ -49,10 +49,14 @@ FACTORS = [0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0]
 
 
 def run_layer(name, path, capacity_k=CAPACITY_K):
-    df = pd.read_csv(path)
+    full = pd.read_csv(path)
+    # Same protocol as real_benchmark.py: static is profiled on the prefix,
+    # and both policies are scored on the same remainder.
+    prefix = full.iloc[:REAL_WARMUP_TOKENS]
+    df = full.iloc[REAL_WARMUP_TOKENS:].reset_index(drop=True)
 
     # Static never migrates, so it is a flat reference line.
-    ranked = ts.rank_experts(df, NUM_EXPERTS)
+    ranked = ts.rank_experts(prefix, NUM_EXPERTS)
     static = ts.simulate_static(df, ts.assign_tiers(ranked, capacity_k))
     static_time = static["avg_time_per_access_ns"]
 

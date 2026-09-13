@@ -211,6 +211,10 @@ REAL_TRACES = {
     "Layer 15": DATA_DIR / "real_expert_trace.csv",
     "Layer 31": DATA_DIR / "real_expert_trace_layer31.csv",
 }
+# Real-trace comparisons: the first REAL_WARMUP_TOKENS tokens are a profiling
+# prefix (deployable static placement ranks experts on them) and are never
+# scored. Every strategy is scored on the same remainder of the trace.
+REAL_WARMUP_TOKENS = 20_000
 
 
 def summary():

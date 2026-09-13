@@ -23,9 +23,21 @@ THREE THINGS THIS DOES THAT THE ORIGINAL DID NOT
    interval is not reproducible, and very short intervals win for reasons
    that undercut the strategy's own justification.
 
+ONE EVALUATION WINDOW FOR EVERY STRATEGY
+----------------------------------------
+The first WARMUP_TOKENS tokens are a profiling prefix and are never scored.
+Every strategy -- static, LRU, periodic, and the token-level statistics --
+is scored on the same remainder, so none of them is measured on tokens it
+was fitted to or on a different span of the workload. Deployable static
+placement ranks experts on the prefix only; the static ORACLE ranks on the
+evaluation window itself (it sees the future) and is reported as a ceiling,
+labelled as such.
+
 Outputs:
   results/real_trace_results.csv       one row per (layer, routing, strategy)
   results/real_periodic_sweep.csv      hit rate vs re-profiling interval
+  results/real_token_residency.csv     per layer: tokens with ALL experts resident
+  results/real_trace_profile.csv       per-expert selection shares (dashboard replay)
   results/real_trace_results.png
 """
 
@@ -37,37 +49,37 @@ import matplotlib.pyplot as plt
 
 from config import (
     RESULTS_DIR, ENCODING, NUM_EXPERTS, CAPACITY_K, REAL_TRACES,
-    REPROFILE_INTERVALS, TOP_K,
+    REPROFILE_INTERVALS, TOP_K, REAL_WARMUP_TOKENS as WARMUP_TOKENS,
 )
 import tier_simulator as ts
 
-WARMUP_TOKENS = 20_000
+
+def static_oracle(eval_df, capacity_k, top_k):
+    """Upper bound: rank on the evaluation window itself. Not deployable (it
+    sees the future); reported as the ceiling a perfect profiler could reach."""
+    ranked = ts.rank_experts(eval_df, NUM_EXPERTS, top_k=top_k)
+    return ts.simulate_static(eval_df, ts.assign_tiers(ranked, capacity_k), top_k=top_k)
 
 
-def static_oracle(trace_df, capacity_k, top_k):
-    """Upper bound: rank on the ENTIRE trace. Not deployable (it sees the
-    future); reported as the ceiling a perfect profiler could reach."""
-    ranked = ts.rank_experts(trace_df, NUM_EXPERTS, top_k=top_k)
-    return ts.simulate_static(trace_df, ts.assign_tiers(ranked, capacity_k), top_k=top_k)
-
-
-def static_warmup(trace_df, capacity_k, top_k, warmup=WARMUP_TOKENS):
-    """Deployable: profile on the first `warmup` tokens, freeze, then measure
-    only on the remainder."""
-    head, tail = trace_df.iloc[:warmup], trace_df.iloc[warmup:]
-    ranked = ts.rank_experts(head, NUM_EXPERTS, top_k=top_k)
-    return ts.simulate_static(tail, ts.assign_tiers(ranked, capacity_k), top_k=top_k)
+def static_warmup(prefix_df, eval_df, capacity_k, top_k):
+    """Deployable: profile on the prefix, freeze, then measure on the
+    evaluation window only."""
+    ranked = ts.rank_experts(prefix_df, NUM_EXPERTS, top_k=top_k)
+    return ts.simulate_static(eval_df, ts.assign_tiers(ranked, capacity_k), top_k=top_k)
 
 
 def analyse_layer(name, path, capacity_k=CAPACITY_K):
-    df = pd.read_csv(path)
+    full = pd.read_csv(path)
+    # Profiling prefix vs the evaluation window every strategy is scored on.
+    prefix = full.iloc[:WARMUP_TOKENS]
+    df = full.iloc[WARMUP_TOKENS:].reset_index(drop=True)
     rows = []
     seq1 = df["expert_1"].to_numpy()
     repeat_rate = float((seq1[1:] == seq1[:-1]).mean())
 
     for routing, top_k in [("top-1", 1), ("top-2", TOP_K)]:
         oracle = static_oracle(df, capacity_k, top_k)
-        warm = static_warmup(df, capacity_k, top_k)
+        warm = static_warmup(prefix, df, capacity_k, top_k)
         lru = ts.simulate_lru(df, capacity_k, top_k=top_k)
 
         per_interval = {
@@ -89,9 +101,10 @@ def analyse_layer(name, path, capacity_k=CAPACITY_K):
                 "note": extra,
             })
 
-    # Token-level residency only means something for top-k > 1.
+    # Token-level residency only means something for top-k > 1. Static uses
+    # the deployable ranking (profiled on the prefix), like the rows above.
     tok_lru = ts.token_level_stats(df, capacity_k, "lru")
-    ranked = ts.rank_experts(df, NUM_EXPERTS)
+    ranked = ts.rank_experts(prefix, NUM_EXPERTS)
     tok_static = ts.token_level_stats(
         df, capacity_k, "static", tier_map=ts.assign_tiers(ranked, capacity_k))
 
@@ -104,24 +117,38 @@ def analyse_layer(name, path, capacity_k=CAPACITY_K):
     ])
 
     meta = {
-        "layer": name, "tokens": len(df), "repeat_rate": repeat_rate,
+        "layer": name, "tokens": len(full), "eval_tokens": len(df),
+        "repeat_rate": repeat_rate,
         "lru_all_resident_pct": tok_lru["all_resident_pct"],
         "lru_any_miss_pct": tok_lru["any_miss_pct"],
         "static_all_resident_pct": tok_static["all_resident_pct"],
     }
-    return pd.DataFrame(rows), sweep, meta
+
+    # Per-expert selection shares over the whole trace. The dashboard's live
+    # replay is calibrated to these, so its illustration traces to the data.
+    cols = ts.expert_columns(full)
+    first = np.bincount(full[cols[0]].to_numpy(), minlength=NUM_EXPERTS)
+    second = (np.bincount(full[cols[1]].to_numpy(), minlength=NUM_EXPERTS)
+              if len(cols) > 1 else np.zeros(NUM_EXPERTS, dtype=int))
+    profile = pd.DataFrame({
+        "layer": name, "expert": np.arange(NUM_EXPERTS),
+        "first_choice_share_pct": first / first.sum() * 100,
+        "second_choice_share_pct": second / max(1, second.sum()) * 100,
+    })
+    return pd.DataFrame(rows), sweep, meta, profile
 
 
 def main():
-    all_rows, all_sweeps, metas = [], [], []
+    all_rows, all_sweeps, metas, profiles = [], [], [], []
     for name, path in REAL_TRACES.items():
         if not path.exists():
             print(f"  !! missing {path.name} -- skipping {name}")
             continue
-        rows, sweep, meta = analyse_layer(name, path)
+        rows, sweep, meta, profile = analyse_layer(name, path)
         all_rows.append(rows)
         all_sweeps.append(sweep)
         metas.append(meta)
+        profiles.append(profile)
 
     if not all_rows:
         print("No real traces found in data/. Skipping.")
@@ -131,6 +158,10 @@ def main():
     sweeps = pd.concat(all_sweeps, ignore_index=True)
     results.to_csv(RESULTS_DIR / "real_trace_results.csv", index=False, encoding=ENCODING)
     sweeps.to_csv(RESULTS_DIR / "real_periodic_sweep.csv", index=False, encoding=ENCODING)
+    pd.DataFrame(metas).to_csv(RESULTS_DIR / "real_token_residency.csv",
+                               index=False, encoding=ENCODING)
+    pd.concat(profiles, ignore_index=True).to_csv(
+        RESULTS_DIR / "real_trace_profile.csv", index=False, encoding=ENCODING)
 
     for m in metas:
         print(f"\n=== {m['layer']} ({m['tokens']:,} tokens, "

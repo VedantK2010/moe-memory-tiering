@@ -164,6 +164,9 @@ def main():
     best_interval = max(interval_scores, key=interval_scores.get)
 
     table, overall, _ = run_phase_comparison(trace, CAPACITY_K, NUM_EXPERTS, best_interval)
+    # Record the interval with the numbers: a periodic result without its
+    # interval is not reproducible.
+    table["periodic_interval"] = best_interval
     table.to_csv(RESULTS_DIR / "nonstationary_by_phase.csv", index=False, encoding=ENCODING)
 
     split = hybrid_split_sweep(trace, CAPACITY_K, NUM_EXPERTS)

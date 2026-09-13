@@ -1,0 +1,1947 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expert Tiering Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* ------------------------------------------------------------------ *
+ * Tokens. Light is defined on bare :root; dark is redefined twice so
+ * the OS setting and the explicit theme stamp both resolve correctly.
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+
+  --plane:      #eef0f2;   /* page ground, cool slate-grey */
+  --panel:      #f8f9fa;   /* reading panels */
+  --surface:    #fbfcfd;   /* chart wells (reference light surface) */
+  --well:       #e4e8eb;   /* recessed instrument wells */
+
+  --ink:        #0b0e11;
+  --ink-2:      #4e545a;
+  --muted:      #7d848b;
+  --grid:       #dde2e6;
+  --rule:       #c2c9cf;
+  --hairline:   rgba(11,14,17,.11);
+
+  --s1: #2a78d6;  /* blue    — Static / HBM        */
+  --s2: #eb6834;  /* orange  — LRU / CXL           */
+  --s3: #1baf7a;  /* aqua    — Periodic re-profile */
+  --s4: #eda100;  /* yellow  — Hybrid              */
+  --s5: #e87ba4;  /* magenta — Prefetch            */
+
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --critical: #d03b3b;
+  --good-ink: #006300;
+
+  --shadow: 0 1px 2px rgba(11,14,17,.05), 0 8px 24px -16px rgba(11,14,17,.22);
+
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  --maxw: 1160px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --plane:    #0b0d0f;
+    --panel:    #13171b;
+    --surface:  #171b20;
+    --well:     #101317;
+    --ink:      #ffffff;
+    --ink-2:    #b9c0c7;
+    --muted:    #858c93;
+    --grid:     #262b31;
+    --rule:     #343a41;
+    --hairline: rgba(255,255,255,.11);
+    --s1: #3987e5;  --s2: #d95926;  --s3: #199e70;  --s4: #c98500;  --s5: #d55181;
+    --good-ink: #0ca30c;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plane:    #0b0d0f;
+  --panel:    #13171b;
+  --surface:  #171b20;
+  --well:     #101317;
+  --ink:      #ffffff;
+  --ink-2:    #b9c0c7;
+  --muted:    #858c93;
+  --grid:     #262b31;
+  --rule:     #343a41;
+  --hairline: rgba(255,255,255,.11);
+  --s1: #3987e5;  --s2: #d95926;  --s3: #199e70;  --s4: #c98500;  --s5: #d55181;
+  --good-ink: #0ca30c;
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -18px rgba(0,0,0,.8);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.12; letter-spacing: -.015em; }
+
+a { color: var(--s1); }
+
+/* ---------------------------------------------------------- shell -- */
+.shell {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: 44px;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding-inline: 20px;
+  padding-block: 0 96px;
+}
+
+/* the memory-map rail: section list addressed like a memory map */
+.rail { position: sticky; top: 0; align-self: start; padding-top: 34px; height: 100vh; overflow-y: auto; }
+.rail-title {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 14px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--hairline);
+}
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rail a {
+  display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: baseline;
+  padding: 7px 0; text-decoration: none; color: var(--ink-2); font-size: 13px;
+  border-left: 2px solid transparent; padding-left: 10px; margin-left: -12px;
+  transition: color .15s, border-color .15s;
+}
+.rail a:hover, .rail a:focus-visible { color: var(--ink); border-left-color: var(--s1); }
+.rail a.is-current { color: var(--ink); border-left-color: var(--s1); font-weight: 600; }
+.rail .addr { font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); letter-spacing: .02em; }
+
+.main { min-width: 0; padding-top: 34px; }
+
+/* --------------------------------------------------------- header -- */
+.masthead { border-bottom: 1px solid var(--rule); padding-bottom: 30px; margin-bottom: 8px; }
+.eyebrow {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .17em; text-transform: uppercase;
+  color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+}
+.eyebrow .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--s1); display: inline-block; }
+h1 { font-size: clamp(34px, 5.4vw, 56px); font-weight: 700; margin: 16px 0 0; }
+h1 .thin { font-weight: 500; color: var(--ink-2); }
+.dek { font-size: 17px; color: var(--ink-2); max-width: 62ch; margin-top: 16px; }
+.byline { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); margin-top: 18px; }
+
+/* headline figures — three, because the finding has three parts */
+.figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--hairline);
+  border: 1px solid var(--hairline); margin-top: 30px; }
+.fig { background: var(--panel); padding: 18px 18px 20px; }
+.fig .k { font-family: var(--f-mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.fig .v { font-family: var(--f-display); font-size: 34px; font-weight: 700; margin-top: 8px; letter-spacing: -.02em; }
+.fig .v small { font-size: 17px; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
+.fig .n { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; }
+
+/* -------------------------------------------------------- section -- */
+section { padding-top: 64px; scroll-margin-top: 24px; }
+.sec-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--rule); padding-bottom: 12px; margin-bottom: 22px; }
+.sec-head .addr { font-family: var(--f-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+.sec-head h2 { font-size: clamp(21px, 2.6vw, 27px); font-weight: 600; }
+.lede { font-size: 15.5px; color: var(--ink-2); max-width: 66ch; }
+.lede + .lede { margin-top: 12px; }
+p { margin: 0 0 14px; }
+p:last-child { margin-bottom: 0; }
+
+.note {
+  border-left: 2px solid var(--s1); padding: 2px 0 2px 16px; margin: 22px 0 0;
+  font-size: 14px; color: var(--ink-2); max-width: 66ch;
+}
+.note strong { color: var(--ink); font-weight: 600; }
+.note.warn { border-left-color: var(--warning); }
+
+/* ------------------------------------------------------ instrument -- */
+.panel { background: var(--panel); border: 1px solid var(--hairline); box-shadow: var(--shadow); margin-top: 22px; }
+.panel-head {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 13px 18px; border-bottom: 1px solid var(--hairline);
+}
+.panel-head h3 { font-size: 14px; font-weight: 600; letter-spacing: -.005em; }
+.panel-head .sub { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.panel-body { padding: 18px; }
+.panel-body.tight { padding: 10px 12px 14px; }
+
+.chartwell { background: var(--surface); border: 1px solid var(--hairline); padding: 8px 10px 4px; }
+.chartwell + .chartwell { margin-top: 14px; }
+
+/* ------------------------------------------------------- controls -- */
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; }
+.ctl { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ctl label { font-family: var(--f-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.ctl .rd { font-family: var(--f-mono); font-size: 13px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--s1); height: 22px; }
+.ctl.slider { flex: 1 1 180px; }
+
+.segmented { display: inline-flex; border: 1px solid var(--rule); background: var(--surface); }
+.segmented button {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 7px 13px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer;
+  border-right: 1px solid var(--hairline);
+}
+.segmented button:last-child { border-right: 0; }
+.segmented button[aria-pressed="true"] { background: var(--s1); color: #fff; }
+.segmented button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
+
+.btn {
+  font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 8px 15px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  cursor: pointer; transition: background .14s, border-color .14s;
+}
+.btn:hover { border-color: var(--s1); }
+.btn:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
+.btn.primary { background: var(--s1); border-color: var(--s1); color: #fff; }
+.btn.primary:hover { filter: brightness(1.07); }
+
+/* --------------------------------------------- the two-rail engine -- */
+.bus { background: var(--well); border: 1px solid var(--hairline); padding: 16px 18px 18px; }
+.bus-label { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--f-mono);
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.rails { position: relative; margin-top: 10px; overflow: hidden; }
+.rail-row { position: relative; height: 54px; border: 1px dashed var(--rule); }
+.rail-row + .rail-row { margin-top: 30px; }
+.rail-row::after {
+  content: attr(data-tag); position: absolute; right: 7px; top: 6px;
+  font-family: var(--f-mono); font-size: 9.5px; letter-spacing: .14em; color: var(--muted);
+}
+.rail-row.hbm { border-color: color-mix(in srgb, var(--s1) 45%, transparent); background: color-mix(in srgb, var(--s1) 7%, transparent); }
+.rail-row.cxl { border-color: color-mix(in srgb, var(--s2) 40%, transparent); background: color-mix(in srgb, var(--s2) 5%, transparent); }
+
+.blk {
+  position: absolute; top: 8px; left: 0; height: 38px; width: 52px;
+  display: grid; place-items: center; gap: 0;
+  font-family: var(--f-mono); font-size: 11px; font-weight: 600;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2);
+  transition: transform .34s cubic-bezier(.4,.9,.3,1), background-color .2s, color .2s, border-color .2s, box-shadow .2s;
+  will-change: transform;
+}
+.blk .pct { font-size: 9px; font-weight: 400; color: var(--muted); letter-spacing: .02em; }
+.blk.in-hbm { border-color: var(--s1); color: var(--s1); background: color-mix(in srgb, var(--s1) 12%, var(--surface)); }
+.blk.in-hbm .pct { color: var(--s1); }
+.blk.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.blk.fault { border-color: var(--s2); color: var(--s2); background: color-mix(in srgb, var(--s2) 16%, var(--surface)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .blk { transition: none; }
+  * { animation-duration: .001ms !important; }
+}
+
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 1px;
+  background: var(--hairline); border: 1px solid var(--hairline); margin-top: 16px; }
+.ro { background: var(--panel); padding: 10px 12px; }
+.ro .k { font-family: var(--f-mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.ro .v { font-family: var(--f-mono); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 3px; }
+
+/* policy scoreboard */
+.scores { display: flex; flex-direction: column; gap: 1px; background: var(--hairline);
+  border: 1px solid var(--hairline); }
+.score { display: grid; grid-template-columns: 150px minmax(0,1fr) 62px; gap: 12px; align-items: center;
+  background: var(--panel); padding: 9px 12px; }
+.score .nm { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+.score .chip { width: 9px; height: 9px; flex: none; }
+.score .track { height: 9px; background: var(--well); position: relative; overflow: hidden; }
+.score .bar { position: absolute; inset: 0 auto 0 0; border-radius: 0 4px 4px 0; transition: width .2s linear; }
+.score .val { font-family: var(--f-mono); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.score.lead .nm { font-weight: 600; }
+
+/* hit/miss tape */
+.tape { display: flex; gap: 2px; margin-top: 14px; height: 22px; align-items: flex-end; overflow: hidden; }
+.tape i { flex: 1 1 0; min-width: 0; background: var(--grid); }
+.tape i.h { background: var(--s1); height: 22px; }
+.tape i.m { background: var(--s2); height: 11px; }
+
+/* ---------------------------------------------------------- table -- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--hairline); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: right; padding: 9px 13px; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-family: var(--f-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); font-weight: 500; background: var(--well); }
+tbody td { font-variant-numeric: tabular-nums; font-family: var(--f-mono); }
+tbody td:first-child { font-family: var(--f-body); }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr.win td { background: color-mix(in srgb, var(--s3) 9%, transparent); }
+.cellchip { display: inline-block; width: 8px; height: 8px; margin-right: 7px; vertical-align: baseline; }
+
+/* --------------------------------------------------------- legend -- */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 6px 2px 2px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+.legend i { width: 10px; height: 10px; flex: none; }
+.legend i.line { height: 3px; width: 15px; border-radius: 2px; }
+
+/* -------------------------------------------------------- tooltip -- */
+#tip {
+  position: fixed; z-index: 60; pointer-events: none; opacity: 0;
+  background: var(--panel); border: 1px solid var(--rule); box-shadow: var(--shadow);
+  padding: 8px 11px; font-size: 12px; transition: opacity .1s; max-width: 260px;
+}
+#tip .t { font-family: var(--f-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+#tip .r { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+#tip .r i { width: 8px; height: 8px; flex: none; }
+#tip .r b { margin-left: auto; font-family: var(--f-mono); font-weight: 600; padding-left: 14px; }
+
+/* ---------------------------------------------------------- misc --- */
+.cols2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .grid-2 { grid-template-columns: 1fr; } }
+
+.deflist { display: grid; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); margin-top: 20px; }
+.deflist > div { background: var(--panel); padding: 14px 16px; display: grid; grid-template-columns: 168px minmax(0,1fr); gap: 18px; }
+.deflist dt { font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; color: var(--ink); text-transform: uppercase; }
+.deflist dd { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+@media (max-width: 700px) { .deflist > div { grid-template-columns: 1fr; gap: 5px; } }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-mono);
+  font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid currentColor;
+}
+.pill.measured { color: var(--good-ink); }
+.pill.modelled { color: var(--muted); }
+.pill.replay  { color: var(--s1); }
+
+footer { margin-top: 72px; padding-top: 22px; border-top: 1px solid var(--rule);
+  font-family: var(--f-mono); font-size: 11px; color: var(--muted); line-height: 1.8; }
+
+/* --------------------------------------------------------- narrow -- */
+@media (max-width: 940px) {
+  .shell { grid-template-columns: minmax(0,1fr); gap: 0; }
+  .rail { position: static; height: auto; padding-top: 26px; overflow: visible; }
+  .rail ol { flex-direction: row; flex-wrap: wrap; gap: 2px 4px; }
+  .rail a { border-left: 0; border-bottom: 2px solid transparent; margin-left: 0; padding: 5px 9px;
+    grid-template-columns: auto; background: var(--panel); }
+  .rail a .addr { display: none; }
+  .rail a.is-current { border-bottom-color: var(--s1); }
+  .main { padding-top: 24px; }
+  .figures { grid-template-columns: 1fr; }
+  .score { grid-template-columns: 120px minmax(0,1fr) 56px; gap: 9px; }
+}
+@media (max-width: 480px) {
+  .score { grid-template-columns: 104px minmax(0,1fr) 52px; }
+  .fig .v { font-size: 29px; }
+}
+</style>
+
+<style>
+/* additions to the shared stylesheet */
+.fig .n b, .lede b, .note b, dd b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.srcline { font-family: var(--f-mono); font-size: 10.5px; color: var(--muted); margin-top: 10px; letter-spacing: .02em; }
+.srcline code { font-family: var(--f-mono); }
+</style>
+</head>
+<body>
+
+<div id="tip" aria-hidden="true"></div>
+
+<div class="shell">
+
+  <nav class="rail" aria-label="Sections">
+    <div class="rail-title">Memory map</div>
+    <ol id="railnav">
+      <li><a href="#engine"><span class="addr">0x00</span><span>Live tiering engine</span></a></li>
+      <li><a href="#config"><span class="addr">0x10</span><span>Capacity vs time</span></a></li>
+      <li><a href="#placement"><span class="addr">0x20</span><span>Does placement matter?</span></a></li>
+      <li><a href="#real"><span class="addr">0x30</span><span>Real traces, top-2</span></a></li>
+      <li><a href="#shift"><span class="addr">0x40</span><span>When the workload shifts</span></a></li>
+      <li><a href="#interval"><span class="addr">0x50</span><span>Re-profiling cadence</span></a></li>
+      <li><a href="#migration"><span class="addr">0x60</span><span>Migration cost</span></a></li>
+      <li><a href="#energy"><span class="addr">0x70</span><span>Energy (measured)</span></a></li>
+      <li><a href="#batch"><span class="addr">0x80</span><span>Batch size</span></a></li>
+      <li><a href="#scale"><span class="addr">0x90</span><span>More, smaller experts</span></a></li>
+      <li><a href="#pooling"><span class="addr">0xA0</span><span>CXL expansion &amp; pooling</span></a></li>
+      <li><a href="#prefetch"><span class="addr">0xB0</span><span>Prefetching</span></a></li>
+      <li><a href="#robust"><span class="addr">0xC0</span><span>Robustness</span></a></li>
+      <li><a href="#method"><span class="addr">0xD0</span><span>Method &amp; limitations</span></a></li>
+    </ol>
+  </nav>
+
+  <main class="main">
+
+    <header class="masthead">
+      <div class="eyebrow"><span class="dot"></span> CXL-based memory optimisation for MoE models</div>
+      <h1>Expert tiering<br><span class="thin">across HBM and CXL</span></h1>
+      <p class="dek">
+        Mixtral&nbsp;8x7B holds <b data-b="expert_gb"></b>&nbsp;GB of expert weights but routes each token to only
+        <b data-b="topk"></b> of its <b data-b="nexp"></b> experts per layer. That is an invitation to demote the cold
+        experts to CXL-attached memory &mdash; if a placement policy can keep the hot ones in HBM. We replayed
+        <b data-b="decisions"></b> real routing decisions (two layers &times; <b data-b="tokens"></b> tokens, top-2)
+        through an analytic HBM/CXL tier model whose DRAM energy per bit is measured with DRAMSim3.
+      </p>
+      <div class="byline">Vedant Kabra &middot; Neil Verma &nbsp;&nbsp;|&nbsp;&nbsp; Mixtral 8x7B &middot; DRAMSim3 &middot; HBM2 + CXL 2.0</div>
+
+      <div class="figures">
+        <div class="fig">
+          <div class="k">Tokens fully served from HBM</div>
+          <div class="v"><span data-b="hero_tok"></span><small>%</small></div>
+          <div class="n">Layer 15, LRU, <b data-b="capk"></b> of <b data-b="nexp"></b> experts in HBM. The per-access hit rate is
+            <b data-b="hero_hit"></b>, yet <b data-b="hero_miss"></b> of tokens still wait on at least one CXL fetch.</div>
+        </div>
+        <div class="fig">
+          <div class="k">Memory energy saved, layer 15</div>
+          <div class="v"><span data-b="hero_energy"></span><small>%</small></div>
+          <div class="n">LRU against the worst policy, both tiers' DRAM energy measured. At layer 31 LRU saves only
+            <b data-b="hero_energy31"></b>; <span data-b="hero_energy31_best"></span>.</div>
+        </div>
+        <div class="fig">
+          <div class="k">A CXL expert fetch takes</div>
+          <div class="v"><span data-b="hero_ratio"></span><small>&times;</small></div>
+          <div class="n">the time of an HBM fetch &mdash; exactly the bandwidth ratio. Latency is
+            <b data-b="hero_latshare"></b> of a <b data-b="expert_mb"></b>&nbsp;MB fetch, so this is a bandwidth problem, not a latency one.</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============================================================ -->
+    <section id="engine">
+      <div class="sec-head"><span class="addr">0x00</span><h2>The live tiering engine</h2></div>
+      <p class="lede">
+        Eight experts, a fixed HBM budget, and a token stream arriving one token &mdash; two experts &mdash; at a time.
+        Blocks on the upper rail are resident in HBM and answer at HBM speed; blocks on the lower rail must be
+        fetched across CXL. All five policies run the same stream simultaneously.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Replay &mdash; <span id="eng-policy-name">LRU</span></h3>
+          <span class="sub"><span class="pill replay">Calibrated replay</span></span>
+        </div>
+        <div class="panel-body">
+
+          <div class="controls" style="margin-bottom:16px">
+            <div class="ctl">
+              <label for="eng-trace">Trace</label>
+              <div class="segmented" id="eng-trace" role="group" aria-label="Trace source">
+                <button type="button" data-trace="l15" aria-pressed="true">Mixtral L15</button>
+                <button type="button" data-trace="l31" aria-pressed="false">Mixtral L31</button>
+                <button type="button" data-trace="shift" aria-pressed="false">Shifting</button>
+              </div>
+            </div>
+            <div class="ctl">
+              <label for="eng-rail">Rail shown</label>
+              <div class="segmented" id="eng-rail" role="group" aria-label="Policy shown on the rails">
+                <button type="button" data-pol="lru" aria-pressed="true">LRU</button>
+                <button type="button" data-pol="static" aria-pressed="false">Static</button>
+                <button type="button" data-pol="periodic" aria-pressed="false">Periodic</button>
+                <button type="button" data-pol="hybrid" aria-pressed="false">Hybrid</button>
+                <button type="button" data-pol="prefetch" aria-pressed="false">Prefetch</button>
+              </div>
+            </div>
+            <div class="ctl slider">
+              <label for="eng-k">HBM budget <span class="rd" id="eng-k-rd">4 of 8 experts</span></label>
+              <input type="range" id="eng-k" min="1" max="7" step="1" value="4">
+            </div>
+            <div class="ctl slider">
+              <label for="eng-speed">Speed <span class="rd" id="eng-speed-rd">12 tok/s</span></label>
+              <input type="range" id="eng-speed" min="1" max="60" step="1" value="12">
+            </div>
+            <div class="ctl">
+              <label>Transport</label>
+              <div style="display:flex;gap:8px">
+                <button type="button" class="btn primary" id="eng-play">Pause</button>
+                <button type="button" class="btn" id="eng-step">Step</button>
+                <button type="button" class="btn" id="eng-reset">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bus">
+            <div class="bus-label">
+              <span>Expert residency &mdash; <span id="eng-policy-tag">lru</span></span>
+              <span id="eng-token">token 000000</span>
+            </div>
+            <div class="rails" id="eng-rails">
+              <div class="rail-row hbm" data-tag="HBM &middot; local" id="rail-hbm"></div>
+              <div class="rail-row cxl" data-tag="CXL &middot; expansion" id="rail-cxl"></div>
+              <div id="eng-blocks"></div>
+            </div>
+            <div class="tape" id="eng-tape" title="Recent 64 accesses: tall = HBM hit, short = CXL fetch"></div>
+          </div>
+
+          <div class="readouts">
+            <div class="ro"><div class="k">Tokens replayed</div><div class="v" id="ro-tok">0</div></div>
+            <div class="ro"><div class="k">Per-access hit rate</div><div class="v" id="ro-hit">0.0%</div></div>
+            <div class="ro"><div class="k">Tokens fully in HBM</div><div class="v" id="ro-full">0.0%</div></div>
+            <div class="ro"><div class="k">Avg expert fetch</div><div class="v" id="ro-lat">0</div></div>
+            <div class="ro"><div class="k">vs HBM-only</div><div class="v" id="ro-slow">&mdash;</div></div>
+          </div>
+
+          <h4 style="font-size:12px;font-family:var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:22px 0 10px">
+            All five policies, same stream, same budget &mdash; per-access hit rate
+          </h4>
+          <div class="scores" id="eng-scores"></div>
+        </div>
+      </div>
+
+      <p class="note">
+        <strong>What you are watching.</strong> The replay is a seeded stream calibrated to the per-expert selection
+        shares and the consecutive-repeat rate measured on the real Mixtral traces
+        (<span data-b="rep15"></span> at layer 15, <span data-b="rep31"></span> at layer 31). It illustrates the mechanism;
+        it is not the measurement. Every other figure on this page is computed by the pipeline and read from
+        <code>results/</code>.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="config">
+      <div class="sec-head"><span class="addr">0x10</span><h2>Capacity bought with time</h2></div>
+      <p class="lede">
+        An expert fetch costs a time-to-first-byte plus the transfer itself, <span style="font-family:var(--f-mono);font-size:13px">t = L + S/B</span>.
+        At Mixtral's <b data-b="expert_mb"></b>&nbsp;MB per expert the transfer term is everything: try the latency sliders and
+        watch nothing move. Every access costs either one HBM fetch or one CXL fetch, so each curve below is a
+        hit-rate curve rescaled &mdash; the model is two-valued.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Memory configurator</h3>
+          <span class="sub"><span class="pill modelled">Synthetic trace</span> recomputed live</span>
+        </div>
+        <div class="panel-body">
+          <div class="controls" style="margin-bottom:18px">
+            <div class="ctl slider">
+              <label for="c-hlat">HBM latency <span class="rd" id="c-hlat-rd"></span></label>
+              <input type="range" id="c-hlat" min="20" max="400" step="any">
+            </div>
+            <div class="ctl slider">
+              <label for="c-hbw">HBM bandwidth <span class="rd" id="c-hbw-rd"></span></label>
+              <input type="range" id="c-hbw" min="200" max="1600" step="25">
+            </div>
+            <div class="ctl slider">
+              <label for="c-clat">CXL latency <span class="rd" id="c-clat-rd"></span></label>
+              <input type="range" id="c-clat" min="60" max="800" step="any">
+            </div>
+            <div class="ctl slider">
+              <label for="c-cbw">CXL bandwidth <span class="rd" id="c-cbw-rd"></span></label>
+              <input type="range" id="c-cbw" min="16" max="256" step="4">
+            </div>
+            <div class="ctl slider">
+              <label for="c-size">Expert size <span class="rd" id="c-size-rd"></span></label>
+              <input type="range" id="c-size" min="0" max="5" step="1">
+            </div>
+            <div class="ctl">
+              <label for="c-reset">&nbsp;</label>
+              <button type="button" class="btn" id="c-reset">Reset to model values</button>
+            </div>
+          </div>
+
+          <div class="readouts" style="margin-bottom:16px">
+            <div class="ro"><div class="k">HBM fetch</div><div class="v" id="c-ro-h">&mdash;</div></div>
+            <div class="ro"><div class="k">CXL fetch</div><div class="v" id="c-ro-c">&mdash;</div></div>
+            <div class="ro"><div class="k">CXL / HBM</div><div class="v" id="c-ro-p">&mdash;</div></div>
+            <div class="ro"><div class="k">Latency share, CXL</div><div class="v" id="c-ro-l">&mdash;</div></div>
+            <div class="ro"><div class="k">k=4, vs all-HBM</div><div class="v" id="c-ro-s">&mdash;</div></div>
+          </div>
+
+          <div class="chartwell">
+            <div id="chart-config" role="img" aria-label="Average expert fetch time against HBM budget for three placement policies"></div>
+            <div class="legend" id="legend-config"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note warn">
+        <strong>Read the shape, not the absolute.</strong> The model charges a full expert transfer on every access, so
+        absolute times are expert-fetch times, not decode-step latencies &mdash; a real decoder reads a resident expert at
+        tile granularity. The comparison between policies is what survives. Hit rates come from the stationary
+        synthetic trace (<code>capacity_sweep.csv</code>); only the timing model is yours to change.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="placement">
+      <div class="sec-head"><span class="addr">0x20</span><h2>Does placement intelligence actually pay?</h2></div>
+      <p class="lede">
+        "Less CXL is faster" is true whichever experts you pick, so it proves nothing. The honest test holds the
+        budget fixed and asks whether ranking experts by demand beats an arbitrary choice. Against
+        <b data-b="ntrials"></b> random placements per budget, the demand-ranked placement is faster at every non-trivial
+        budget, by up to <b data-b="svr_peak"></b> at <b data-b="svr_peak_k"></b> of 8 slots.
+      </p>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><h3>Ranked vs random, same budget</h3><span class="sub"><span class="pill modelled">Synthetic</span></span></div>
+          <div class="panel-body tight">
+            <div class="chartwell">
+              <div id="chart-svr" role="img" aria-label="Average expert fetch time for demand-ranked versus random placement at each HBM budget"></div>
+              <div class="legend" id="legend-svr"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Advantage of ranking</h3><span class="sub">percent faster than random</span></div>
+          <div class="panel-body tight">
+            <div class="chartwell">
+              <div id="chart-adv" role="img" aria-label="Percentage advantage of ranked over random placement at each HBM budget"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        <strong>The endpoints are degenerate by construction.</strong> At k=0 and k=8 every placement is the same
+        placement, so the advantage is exactly zero &mdash; a sanity check on the harness, not a result. The ranking counts
+        <em>both</em> routed experts per token; an earlier version ranked on the first choice only and chose the HBM set
+        from half the demand.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="real">
+      <div class="sec-head"><span class="addr">0x30</span><h2>Real traces: top-2 changes the story</h2></div>
+      <p class="lede">
+        Every routing decision from two layers of <span style="font-family:var(--f-mono);font-size:13px">allenai/analysis_mixtral</span>
+        &mdash; layer 15 in the middle of the stack, layer 31 at the top. Reading only each token's first-choice expert
+        (top-1), the best policy appears to depend on depth. Mixtral routes every token to <em>two</em> experts, and
+        on the real top-2 workload <span data-b="real_verdict"></span>
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>HBM hit rate: top-1 (hollow) vs top-2 (filled)</h3>
+          <div class="segmented" id="real-toggle" role="group" aria-label="Layer">
+            <button type="button" data-layer="Layer 15" aria-pressed="true">Layer 15</button>
+            <button type="button" data-layer="Layer 31" aria-pressed="false">Layer 31</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-real" role="img" aria-label="HBM hit rate per policy under top-1 and top-2 routing"></div>
+            <div class="legend" id="legend-real"></div>
+          </div>
+          <div class="tablewrap" style="margin-top:16px">
+            <table>
+              <thead><tr><th>Policy</th><th>L15 top-1</th><th>L15 top-2</th><th>L31 top-1</th><th>L31 top-2</th></tr></thead>
+              <tbody id="tbody-real"></tbody>
+            </table>
+          </div>
+          <div class="srcline">All policies are scored on the same window: the first <span data-b="warmup"></span> tokens are a profiling prefix and are never scored. Deployable static ranks experts on that prefix; the oracle ranks on the scored window itself and is a ceiling, not a policy.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>What the user waits for: tokens with <em>both</em> experts in HBM</h3><span class="sub"><span class="pill measured">Measured</span> top-2, 4 of 8</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-resid" role="img" aria-label="Per-access hit rate and token-level residency per layer"></div>
+            <div class="legend" id="legend-resid"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        <strong>Per-access hit rate overstates what a token sees.</strong> A token avoids CXL only when both of its experts
+        are resident. <span data-b="resid_note"></span>
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="shift">
+      <div class="sec-head"><span class="addr">0x40</span><h2>When the workload shifts underneath you</h2></div>
+      <p class="lede">
+        To isolate adaptation, a three-phase synthetic trace rotates its hot experts at each boundary. Static
+        placement gets the deal a real deployment gets: profile once on phase 0, then live with it.
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>HBM hit rate per phase</h3><span class="sub"><span class="pill modelled">Synthetic</span> HBM budget = 4 &middot; higher is better</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-phase" role="img" aria-label="HBM hit rate per phase for four placement policies under a shifting workload"></div>
+            <div class="legend" id="legend-phase"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note"><span data-b="phase_note"></span></p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="interval">
+      <div class="sec-head"><span class="addr">0x50</span><h2>How often should you re-profile?</h2></div>
+      <p class="lede">
+        Periodic re-profiling re-ranks the experts every N tokens from the window just finished. It is meant to be
+        a cheaper alternative to a dynamic cache. On the real top-2 traces, <span data-b="iv_lede"></span>
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Re-profiling interval sweep (real traces, top-2)</h3>
+          <div class="segmented" id="iv-toggle" role="group" aria-label="Layer">
+            <button type="button" data-layer="Layer 15" aria-pressed="true">Layer 15</button>
+            <button type="button" data-layer="Layer 31" aria-pressed="false">Layer 31</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-interval" role="img" aria-label="HBM hit rate against re-profiling interval, with LRU and static reference lines"></div>
+            <div class="legend" id="legend-interval"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note warn"><span data-b="iv_note"></span></p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="migration">
+      <div class="sec-head"><span class="addr">0x60</span><h2>What if migration isn't free?</h2></div>
+      <p class="lede">
+        Every LRU miss installs a <b data-b="expert_mb"></b>&nbsp;MB expert into HBM. Static placement never migrates.
+        Charging a fraction of a full HBM write (<b data-b="mig_full"></b>) per install penalises LRU alone, so there is
+        a cost at which its advantage disappears. <span data-b="mig_lede"></span>
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>LRU advantage over static as migration cost rises</h3><span class="sub"><span class="pill measured">Real traces</span> top-2, 4 of 8</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-mig" role="img" aria-label="LRU time advantage over static placement against migration cost"></div>
+            <div class="legend" id="legend-mig"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        <strong>Why this matters for the recommendation.</strong> If LRU wins only when migration is free, the honest
+        advice is static or periodic placement. Real systems overlap part of an install with compute, so the true
+        factor sits somewhere between 0 and 1; the curve is reported rather than a single point.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="energy">
+      <div class="sec-head"><span class="addr">0x70</span><h2>Energy follows the hit rate</h2></div>
+      <p class="lede">
+        Both tiers' DRAM energy per bit is measured with DRAMSim3 (read + activate energy per DRAM command, on a
+        streaming trace that ends when the simulation does). The CXL figure adds a cited link cost for the SerDes
+        and PHY, which DRAMSim3 does not model.
+      </p>
+
+      <div class="readouts">
+        <div class="ro"><div class="k">HBM DRAM</div><div class="v"><span data-b="e_hbm"></span></div></div>
+        <div class="ro"><div class="k">CXL DRAM (DDR4)</div><div class="v"><span data-b="e_cxl_dram"></span></div></div>
+        <div class="ro"><div class="k">CXL link (cited)</div><div class="v"><span data-b="e_link"></span></div></div>
+        <div class="ro"><div class="k">HBM fetch</div><div class="v"><span data-b="e_fetch_hbm"></span></div></div>
+        <div class="ro"><div class="k">CXL fetch</div><div class="v"><span data-b="e_fetch_cxl"></span></div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Memory energy per token</h3><span class="sub"><span class="pill measured">Measured hit rates</span> <span class="pill measured">Measured DRAM pJ/bit</span></span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-energy" role="img" aria-label="Memory energy per token per policy at layers 15 and 31"></div>
+            <div class="legend" id="legend-energy"></div>
+          </div>
+          <div class="tablewrap" style="margin-top:16px">
+            <table>
+              <thead><tr><th>Layer</th><th>Policy</th><th>Hit rate</th><th>Energy / token</th><th>Saved vs worst</th></tr></thead>
+              <tbody id="tbody-energy"></tbody>
+            </table>
+          </div>
+          <div class="srcline">CXL energy basis: <span data-b="e_basis"></span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>The DRAMSim3 runs behind the pJ/bit</h3><span class="sub">dramsim3/*_stats.json</span></div>
+        <div class="panel-body tight">
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Run</th><th>Channels used</th><th>Reads</th><th>Merged</th><th>Utilisation</th><th>Row hits</th><th>pJ/bit</th></tr></thead>
+              <tbody id="tbody-dramsim"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <p class="note warn">
+        <strong>Not independent evidence.</strong> Both tiers have a fixed pJ/bit and every access moves the same bytes, so
+        energy per token is an exact linear function of hit rate &mdash; this section restates the hit-rate result in
+        joules. Present it as a cost translation, not as corroboration. HBM2 utilisation is capped at
+        <span data-b="ds_ceiling"></span> by DRAMSim3's trace reader (one request per cycle), which the run nearly reaches.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="batch">
+      <div class="sec-head"><span class="addr">0x80</span><h2>Where tiering stops paying: batch size</h2></div>
+      <p class="lede">
+        Everything above is batch-1 decode. In a batch, one decode step must fetch the <em>union</em> of every token's
+        experts. <span data-b="batch_lede"></span>
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Experts touched per decode step, and steps that never touch CXL</h3><span class="sub"><span class="pill measured">Real trace</span> layer 15, 4 of 8</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-batch" role="img" aria-label="Share of experts touched per step and share of fully resident steps against batch size"></div>
+            <div class="legend" id="legend-batch"></div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><span data-b="batch_note"></span></p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="scale">
+      <div class="sec-head"><span class="addr">0x90</span><h2>More, smaller experts: harder, not easier</h2></div>
+      <p class="lede">
+        Modern MoE layers use far more, smaller experts (DeepSeek-V3: 256 experts, top-8). The intuition is that each
+        token touches a smaller fraction of experts, so tiering gets easier. Holding the HBM budget as a fixed
+        <em>fraction</em> of all experts, <span data-b="scale_lede"></span>
+      </p>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Tokens with every expert resident</h3>
+          <div class="segmented" id="scale-toggle" role="group" aria-label="HBM budget fraction"></div>
+        </div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-scale" role="img" aria-label="Share of tokens with all experts resident against expert count, for fixed and scaled top-k"></div>
+            <div class="legend" id="legend-scale"></div>
+          </div>
+        </div>
+      </div>
+      <p class="note">
+        <strong>top-k dominates, not N.</strong> A token is served from HBM only when all k of its experts are resident, so the
+        chance of a clean token falls roughly geometrically in k. Synthetic traces vary expert count and top-k only;
+        they are not measurements of those models.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="pooling">
+      <div class="sec-head"><span class="addr">0xA0</span><h2>CXL expansion and pooling</h2></div>
+      <p class="lede">
+        A cluster serving R replicas of one model can give each its own CXL device, or share one pooled copy of the
+        cold experts &mdash; expert weights are read-only during inference, so a single copy is legitimate.
+        <span data-b="pool_lede"></span>
+      </p>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><h3>Cold-expert capacity</h3><span class="sub"><span class="pill modelled">Model</span></span></div>
+          <div class="panel-body tight">
+            <div class="chartwell">
+              <div id="chart-pool-cap" role="img" aria-label="CXL capacity needed for private versus pooled cold experts against replica count"></div>
+              <div class="legend" id="legend-pool-cap"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>The catch: per-access slowdown</h3><span class="sub">pooled vs private</span></div>
+          <div class="panel-body tight">
+            <div class="chartwell">
+              <div id="chart-pool-bw" role="img" aria-label="Per-access slowdown of pooled CXL against replica count for several link counts"></div>
+              <div class="legend" id="legend-pool-bw"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><span data-b="pool_note"></span></p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="prefetch">
+      <div class="sec-head"><span class="addr">0xB0</span><h2>Prefetching: a negative result</h2></div>
+      <p class="lede">
+        A decode token takes tens of milliseconds and a CXL expert fetch about five, so there is time to fetch the next
+        token's expert early &mdash; if it can be predicted. An online Markov predictor, gated by confidence, was run on
+        <b data-b="pf_ndata"></b> datasets in <b data-b="pf_nruns"></b> configurations.
+        <span data-b="pf_lede"></span>
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Best hit rate each dataset reaches, and its cost</h3><span class="sub">hollow = LRU alone &middot; filled = LRU + prefetch</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-prefetch" role="img" aria-label="LRU hit rate against best prefetch hit rate per dataset"></div>
+          </div>
+          <div class="tablewrap" style="margin-top:16px">
+            <table>
+              <thead><tr><th>Dataset</th><th>LRU hit</th><th>Best gain</th><th>Config</th><th>Accuracy</th><th>CXL traffic</th><th>Energy</th></tr></thead>
+              <tbody id="tbody-prefetch"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <p class="note warn">
+        <strong>Prefetching can only hide latency.</strong> A correct prefetch still moves the expert across the link, just
+        earlier, and a wrong one moves it for nothing, so CXL traffic and energy can only go up. The hit-rate gain is an
+        upper bound (a correct guess is assumed to hide the whole fetch). On a bandwidth-constrained expansion link the
+        exchange rate is poor.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="robust">
+      <div class="sec-head"><span class="addr">0xC0</span><h2>Does the ranking survive a second dataset?</h2></div>
+      <p class="lede">
+        The phased results rest on particular random draws. An independent trace &mdash; different seed, sharper skew &mdash;
+        was generated and all four policies re-run. <span data-b="rob_lede"></span>
+      </p>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Rank stability across two independent datasets</h3><span class="sub"><span class="pill modelled">Synthetic</span> higher hit rate = better rank</span></div>
+        <div class="panel-body">
+          <div class="chartwell">
+            <div id="chart-robust" role="img" aria-label="Overall hit rate for each policy on dataset 1 and dataset 2"></div>
+            <div class="legend" id="legend-robust"></div>
+          </div>
+          <div class="tablewrap" style="margin-top:16px">
+            <table>
+              <thead><tr><th>Policy</th><th>Dataset 1</th><th>Rank</th><th>Dataset 2</th><th>Rank</th><th>Verdict</th></tr></thead>
+              <tbody id="tbody-robust"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="method">
+      <div class="sec-head"><span class="addr">0xD0</span><h2>Method, and what it does not show</h2></div>
+      <p class="lede">
+        The simplifications below are load-bearing. Each is a place where a reader should discount a result, and each
+        is something the next version of this work should close.
+      </p>
+
+      <div class="deflist">
+        <div><dt>Analytic model</dt><dd>Latency comes from an analytic two-tier model, not a cycle-accurate simulation: an access costs L + S/B at HBM (<b data-b="m_hbm"></b>) or CXL (<b data-b="m_cxl"></b>). DRAMSim3 supplies DRAM energy per bit only.</dd></div>
+        <div><dt>Bandwidth-bound</dt><dd>At <b data-b="expert_mb"></b>&nbsp;MB per expert the latency term is <b data-b="hero_latshare"></b> of a CXL fetch, so the CXL/HBM time ratio equals the bandwidth ratio. CXL's latency adder is invisible at expert granularity &mdash; a finding, but it means this is a bandwidth study.</dd></div>
+        <div><dt>Two-valued</dt><dd>Every access costs one HBM or one CXL fetch, so time and energy are exact linear functions of hit rate. Energy does not independently corroborate the latency result.</dd></div>
+        <div><dt>Per-access re-fetch</dt><dd>Each access is charged a full expert transfer. Real inference reads a resident expert at tile granularity, so absolute times are fetch times, not decode latencies. Comparisons between policies survive.</dd></div>
+        <div><dt>HBM latency</dt><dd><b data-b="m_hbm_lat"></b> is an idle-load DRAM device latency, not end-to-end load-to-use.</dd></div>
+        <div><dt>Energy</dt><dd>DRAM energy per bit is measured with DRAMSim3 on HBM2 and on DDR4-3200 standing in for DDR5 (DRAMSim3 has no DDR5 configuration). The <b data-b="e_link"></b> CXL link figure is cited, not simulated. The DRAMSim3 trace is a scaled sample: 8 &times; 64&nbsp;B reads per expert fetch, each fetch continuing through the expert.</dd></div>
+        <div><dt>Real traces</dt><dd>Two layers of <span style="font-family:var(--f-mono);font-size:12.5px">allenai/analysis_mixtral</span>, full top-2 routing. Expert popularity is domain-dependent, and the thesis is about workload shift.</dd></div>
+        <div><dt>Batch-1</dt><dd>Except in the batch-size study, every result is batch-1 decode.</dd></div>
+        <div><dt>Synthetic traces</dt><dd>Used where a controlled change is needed (shift, robustness, scalability, capacity sweep); calibrated to Mixtral's skew and locality, not measurements of other models.</dd></div>
+        <div><dt>One model family</dt><dd>All real measurements are Mixtral 8x7B. Whether the conclusions carry to 64&ndash;256-expert models is tested only synthetically.</dd></div>
+      </div>
+    </section>
+
+    <footer>
+      CXL-Based Memory Optimisation for MoE Models &middot; Vedant Kabra, Neil Verma<br>
+      Sources: Mixtral of Experts (Jiang et al., 2024) &middot; Switch Transformer (Fedus et al., 2022) &middot;
+      DRAMsim3 (Li et al., 2020) &middot; CXL 2.0 specification &middot; allenai/analysis_mixtral<br>
+      Every figure on this page is read from <code>results/</code> by <code>src/build_dashboard.py</code>;
+      regenerate with <code>python run_all.py</code>.
+    </footer>
+
+  </main>
+</div>
+
+<script>
+/* @@DATA-BEGIN@@ written by src/build_dashboard.py from results/ -- do not edit */
+const DATA = {"params":{"num_experts":8.0,"top_k":2.0,"num_layers":32.0,"capacity_k":4.0,"num_random_trials":20.0,"expert_bytes":352322000.0,"expert_gb_all_layers":90.1943,"hbm_latency_ns":60.78,"hbm_bandwidth_gbps":800.0,"cxl_device_latency_ns":90.0,"cxl_added_latency_ns":70.0,"cxl_latency_ns":160.0,"cxl_bandwidth_gbps":64.0,"hbm_time_ns":410217.0,"cxl_time_ns":5127110.0,"hbm_pj_per_bit":1.6321,"cxl_dram_pj_per_bit":9.08016,"cxl_link_pj_per_bit":5.0,"cxl_pj_per_bit":14.0802,"hbm_fetch_mj":4.60019,"cxl_fetch_mj":39.686,"real_warmup_tokens":20000.0},"energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","dramsim":[{"label":"hbm2_loaded","device":"HBM2","channels":8,"active_channels":8,"cycles":271000.0,"reads":256001.0,"read_cmds":256000.0,"merged_reads_pct":0.000390623,"tck_ns":1.0,"avg_read_latency_ns":48.7577,"row_hit_rate_pct":96.1918,"dram_bandwidth_gbps":60.4576,"peak_bandwidth_gbps":256.0,"utilisation_pct":23.6162,"frontend_ceiling_pct":25.0,"idle_cycles_pct":9.18298,"dynamic_energy_pj":213923000.0,"dynamic_pj_per_access":835.635,"dynamic_pj_per_bit":1.6321,"background_share_pct":44.7244},{"label":"ddr4_cxl","device":"DDR4","channels":1,"active_channels":1,"cycles":1250000.0,"reads":256001.0,"read_cmds":256000.0,"merged_reads_pct":0.000390623,"tck_ns":0.63,"avg_read_latency_ns":199.237,"row_hit_rate_pct":97.1191,"dram_bandwidth_gbps":20.8051,"peak_bandwidth_gbps":25.6,"utilisation_pct":81.2698,"frontend_ceiling_pct":100.0,"idle_cycles_pct":9.88224,"dynamic_energy_pj":1190160000.0,"dynamic_pj_per_access":4649.04,"dynamic_pj_per_bit":9.08016,"background_share_pct":54.4955}],"capacity":[{"num_experts_in_hbm":0,"hbm_budget_gb":0.0,"static_hit_rate_pct":0.0,"static_avg_time_ns":5127110.0,"random_hit_rate_pct":0.0,"random_avg_time_ns_mean":5127110.0,"random_avg_time_ns_std":0.0,"smart_advantage_pct":0.0,"lru_hit_rate_pct":0.0,"lru_avg_time_ns":5127110.0},{"num_experts_in_hbm":1,"hbm_budget_gb":0.352322,"static_hit_rate_pct":15.142,"static_avg_time_ns":4412880.0,"random_hit_rate_pct":12.4132,"random_avg_time_ns_mean":4541590.0,"random_avg_time_ns_std":67459.5,"smart_advantage_pct":2.83408,"lru_hit_rate_pct":5.08,"lru_avg_time_ns":4887490.0},{"num_experts_in_hbm":2,"hbm_budget_gb":0.704643,"static_hit_rate_pct":29.472,"static_avg_time_ns":3736950.0,"random_hit_rate_pct":24.8174,"random_avg_time_ns_mean":3956500.0,"random_avg_time_ns_std":82484.6,"smart_advantage_pct":5.54916,"lru_hit_rate_pct":25.893,"lru_avg_time_ns":3905770.0},{"num_experts_in_hbm":3,"hbm_budget_gb":1.05696,"static_hit_rate_pct":42.34,"static_avg_time_ns":3129980.0,"random_hit_rate_pct":37.9502,"random_avg_time_ns_mean":3337040.0,"random_avg_time_ns_std":92556.5,"smart_advantage_pct":6.20497,"lru_hit_rate_pct":38.457,"lru_avg_time_ns":3313140.0},{"num_experts_in_hbm":4,"hbm_budget_gb":1.40929,"static_hit_rate_pct":54.926,"static_avg_time_ns":2536310.0,"random_hit_rate_pct":49.6355,"random_avg_time_ns_mean":2785860.0,"random_avg_time_ns_std":118886.0,"smart_advantage_pct":8.95765,"lru_hit_rate_pct":50.857,"lru_avg_time_ns":2728240.0},{"num_experts_in_hbm":5,"hbm_budget_gb":1.76161,"static_hit_rate_pct":67.049,"static_avg_time_ns":1964480.0,"random_hit_rate_pct":62.4185,"random_avg_time_ns_mean":2182900.0,"random_avg_time_ns_std":105149.0,"smart_advantage_pct":10.0058,"lru_hit_rate_pct":63.422,"lru_avg_time_ns":2135560.0},{"num_experts_in_hbm":6,"hbm_budget_gb":2.11393,"static_hit_rate_pct":78.354,"static_avg_time_ns":1431240.0,"random_hit_rate_pct":74.6268,"random_avg_time_ns_mean":1607040.0,"random_avg_time_ns_std":78522.1,"smart_advantage_pct":10.9398,"lru_hit_rate_pct":75.815,"lru_avg_time_ns":1551000.0},{"num_experts_in_hbm":7,"hbm_budget_gb":2.46625,"static_hit_rate_pct":89.442,"static_avg_time_ns":908227.0,"random_hit_rate_pct":87.1415,"random_avg_time_ns_mean":1016740.0,"random_avg_time_ns_std":75838.8,"smart_advantage_pct":10.6724,"lru_hit_rate_pct":88.078,"lru_avg_time_ns":972565.0},{"num_experts_in_hbm":8,"hbm_budget_gb":2.81857,"static_hit_rate_pct":100.0,"static_avg_time_ns":410217.0,"random_hit_rate_pct":100.0,"random_avg_time_ns_mean":410217.0,"random_avg_time_ns_std":5.82077e-11,"smart_advantage_pct":1.41895e-14,"lru_hit_rate_pct":100.0,"lru_avg_time_ns":410217.0}],"real":[{"layer":"Layer 15","routing":"top-1","strategy":"Static (oracle)","hit_rate_pct":57.519,"avg_time_ns":2414000.0,"note":null},{"layer":"Layer 15","routing":"top-1","strategy":"Static (profiled on first 20k)","hit_rate_pct":57.1578,"avg_time_ns":2431040.0,"note":null},{"layer":"Layer 15","routing":"top-1","strategy":"LRU","hit_rate_pct":64.9292,"avg_time_ns":2064470.0,"note":null},{"layer":"Layer 15","routing":"top-1","strategy":"Periodic (every 100)","hit_rate_pct":60.9151,"avg_time_ns":2253810.0,"note":"interval=100"},{"layer":"Layer 15","routing":"top-2","strategy":"Static (oracle)","hit_rate_pct":55.5222,"avg_time_ns":2508190.0,"note":null},{"layer":"Layer 15","routing":"top-2","strategy":"Static (profiled on first 20k)","hit_rate_pct":54.9827,"avg_time_ns":2533640.0,"note":null},{"layer":"Layer 15","routing":"top-2","strategy":"LRU","hit_rate_pct":59.5179,"avg_time_ns":2319710.0,"note":null},{"layer":"Layer 15","routing":"top-2","strategy":"Periodic (every 100)","hit_rate_pct":58.4867,"avg_time_ns":2368350.0,"note":"interval=100"},{"layer":"Layer 31","routing":"top-1","strategy":"Static (oracle)","hit_rate_pct":65.7506,"avg_time_ns":2025720.0,"note":null},{"layer":"Layer 31","routing":"top-1","strategy":"Static (profiled on first 20k)","hit_rate_pct":65.6362,"avg_time_ns":2031120.0,"note":null},{"layer":"Layer 31","routing":"top-1","strategy":"LRU","hit_rate_pct":65.8984,"avg_time_ns":2018750.0,"note":null},{"layer":"Layer 31","routing":"top-1","strategy":"Periodic (every 100)","hit_rate_pct":67.3519,"avg_time_ns":1950200.0,"note":"interval=100"},{"layer":"Layer 31","routing":"top-2","strategy":"Static (oracle)","hit_rate_pct":56.2154,"avg_time_ns":2475490.0,"note":null},{"layer":"Layer 31","routing":"top-2","strategy":"Static (profiled on first 20k)","hit_rate_pct":55.9206,"avg_time_ns":2489390.0,"note":null},{"layer":"Layer 31","routing":"top-2","strategy":"LRU","hit_rate_pct":56.2565,"avg_time_ns":2473550.0,"note":null},{"layer":"Layer 31","routing":"top-2","strategy":"Periodic (every 100)","hit_rate_pct":58.4678,"avg_time_ns":2369250.0,"note":"interval=100"}],"residency":[{"layer":"Layer 15","tokens":829440,"eval_tokens":809440,"repeat_rate":0.233609,"lru_all_resident_pct":37.1396,"lru_any_miss_pct":62.8604,"static_all_resident_pct":28.3589},{"layer":"Layer 31","tokens":829440,"eval_tokens":809440,"repeat_rate":0.231728,"lru_all_resident_pct":39.7945,"lru_any_miss_pct":60.2055,"static_all_resident_pct":43.6045}],"profile":{"Layer 15":{"first":[11.1737,11.7452,14.734,6.78783,12.7819,13.0898,14.95,14.7377],"second":[11.3145,15.8275,12.7664,7.7404,13.8051,14.2192,13.7119,10.6149],"repeat_rate":0.233609},"Layer 31":{"first":[15.2873,18.1315,14.0905,14.1995,6.51307,6.72514,18.1396,6.91346],"second":[7.52568,6.52742,6.04769,19.1266,13.5441,18.8017,10.1642,18.2626],"repeat_rate":0.231728}},"periodic_sweep":[{"layer":"Layer 15","routing":"top-1","interval":100,"hit_rate_pct":60.9151},{"layer":"Layer 15","routing":"top-1","interval":200,"hit_rate_pct":59.7538},{"layer":"Layer 15","routing":"top-1","interval":500,"hit_rate_pct":57.8159},{"layer":"Layer 15","routing":"top-1","interval":1000,"hit_rate_pct":56.3407},{"layer":"Layer 15","routing":"top-1","interval":2000,"hit_rate_pct":55.9067},{"layer":"Layer 15","routing":"top-1","interval":5000,"hit_rate_pct":55.9575},{"layer":"Layer 15","routing":"top-1","interval":10000,"hit_rate_pct":56.3941},{"layer":"Layer 15","routing":"top-1","interval":20000,"hit_rate_pct":56.6156},{"layer":"Layer 15","routing":"top-2","interval":100,"hit_rate_pct":58.4867},{"layer":"Layer 15","routing":"top-2","interval":200,"hit_rate_pct":57.5633},{"layer":"Layer 15","routing":"top-2","interval":500,"hit_rate_pct":55.988},{"layer":"Layer 15","routing":"top-2","interval":1000,"hit_rate_pct":55.0203},{"layer":"Layer 15","routing":"top-2","interval":2000,"hit_rate_pct":54.4714},{"layer":"Layer 15","routing":"top-2","interval":5000,"hit_rate_pct":54.4976},{"layer":"Layer 15","routing":"top-2","interval":10000,"hit_rate_pct":54.6394},{"layer":"Layer 15","routing":"top-2","interval":20000,"hit_rate_pct":54.9146},{"layer":"Layer 31","routing":"top-1","interval":100,"hit_rate_pct":67.3519},{"layer":"Layer 31","routing":"top-1","interval":200,"hit_rate_pct":67.043},{"layer":"Layer 31","routing":"top-1","interval":500,"hit_rate_pct":66.3126},{"layer":"Layer 31","routing":"top-1","interval":1000,"hit_rate_pct":65.9096},{"layer":"Layer 31","routing":"top-1","interval":2000,"hit_rate_pct":65.7518},{"layer":"Layer 31","routing":"top-1","interval":5000,"hit_rate_pct":65.6204},{"layer":"Layer 31","routing":"top-1","interval":10000,"hit_rate_pct":65.2996},{"layer":"Layer 31","routing":"top-1","interval":20000,"hit_rate_pct":65.4833},{"layer":"Layer 31","routing":"top-2","interval":100,"hit_rate_pct":58.4678},{"layer":"Layer 31","routing":"top-2","interval":200,"hit_rate_pct":57.5371},{"layer":"Layer 31","routing":"top-2","interval":500,"hit_rate_pct":56.2355},{"layer":"Layer 31","routing":"top-2","interval":1000,"hit_rate_pct":55.3984},{"layer":"Layer 31","routing":"top-2","interval":2000,"hit_rate_pct":55.1027},{"layer":"Layer 31","routing":"top-2","interval":5000,"hit_rate_pct":55.1835},{"layer":"Layer 31","routing":"top-2","interval":10000,"hit_rate_pct":55.3428},{"layer":"Layer 31","routing":"top-2","interval":20000,"hit_rate_pct":55.6692}],"phases":[{"phase":0,"hit_rate_pct_static":54.7525,"hit_rate_pct_lru":51.2775,"hit_rate_pct_hybrid":53.475,"hit_rate_pct_periodic":53.9425,"periodic_interval":2000},{"phase":1,"hit_rate_pct_static":50.5675,"hit_rate_pct_lru":51.3625,"hit_rate_pct_hybrid":50.275,"hit_rate_pct_periodic":54.055,"periodic_interval":2000},{"phase":2,"hit_rate_pct_static":48.0275,"hit_rate_pct_lru":50.99,"hit_rate_pct_hybrid":49.02,"hit_rate_pct_periodic":53.605,"periodic_interval":2000}],"robustness":[{"strategy":"Static","dataset1_hit_rate_pct":51.1158,"dataset2_hit_rate_pct":53.5525,"dataset1_rank":3,"dataset2_rank":3,"dataset1_periodic_interval":2000,"dataset2_periodic_interval":500},{"strategy":"Lru","dataset1_hit_rate_pct":51.21,"dataset2_hit_rate_pct":55.4992,"dataset1_rank":2,"dataset2_rank":2,"dataset1_periodic_interval":2000,"dataset2_periodic_interval":500},{"strategy":"Hybrid","dataset1_hit_rate_pct":50.9233,"dataset2_hit_rate_pct":49.8667,"dataset1_rank":4,"dataset2_rank":4,"dataset1_periodic_interval":2000,"dataset2_periodic_interval":500},{"strategy":"Periodic","dataset1_hit_rate_pct":53.8675,"dataset2_hit_rate_pct":66.2333,"dataset1_rank":1,"dataset2_rank":1,"dataset1_periodic_interval":2000,"dataset2_periodic_interval":500}],"migration":[{"layer":"Layer 15","migration_factor":0.0,"migration_cost_us":0.0,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2319710.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":8.44329,"migrations":655356},{"layer":"Layer 15","migration_factor":0.05,"migration_cost_us":20.5109,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2328020.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":8.11557,"migrations":655356},{"layer":"Layer 15","migration_factor":0.1,"migration_cost_us":41.0217,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2336320.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":7.78785,"migrations":655356},{"layer":"Layer 15","migration_factor":0.15,"migration_cost_us":61.5326,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2344620.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":7.46013,"migrations":655356},{"layer":"Layer 15","migration_factor":0.2,"migration_cost_us":82.0434,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2352930.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":7.13241,"migrations":655356},{"layer":"Layer 15","migration_factor":0.3,"migration_cost_us":123.065,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2369530.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":6.47698,"migrations":655356},{"layer":"Layer 15","migration_factor":0.4,"migration_cost_us":164.087,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2386140.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":5.82154,"migrations":655356},{"layer":"Layer 15","migration_factor":0.5,"migration_cost_us":205.109,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2402750.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":5.1661,"migrations":655356},{"layer":"Layer 15","migration_factor":0.75,"migration_cost_us":307.663,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2444260.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":3.5275,"migrations":655356},{"layer":"Layer 15","migration_factor":1.0,"migration_cost_us":410.217,"lru_hit_rate_pct":59.5179,"lru_avg_time_ns":2485780.0,"static_avg_time_ns":2533640.0,"static_hit_rate_pct":54.9827,"lru_advantage_pct":1.8889,"migrations":655356},{"layer":"Layer 31","migration_factor":0.0,"migration_cost_us":0.0,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2473550.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":0.636366,"migrations":708155},{"layer":"Layer 31","migration_factor":0.05,"migration_cost_us":20.5109,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2482530.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":0.275951,"migrations":708155},{"layer":"Layer 31","migration_factor":0.1,"migration_cost_us":41.0217,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2491500.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-0.0844648,"migrations":708155},{"layer":"Layer 31","migration_factor":0.15,"migration_cost_us":61.5326,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2500470.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-0.44488,"migrations":708155},{"layer":"Layer 31","migration_factor":0.2,"migration_cost_us":82.0434,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2509440.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-0.805296,"migrations":708155},{"layer":"Layer 31","migration_factor":0.3,"migration_cost_us":123.065,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2527390.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-1.52613,"migrations":708155},{"layer":"Layer 31","migration_factor":0.4,"migration_cost_us":164.087,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2545330.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-2.24696,"migrations":708155},{"layer":"Layer 31","migration_factor":0.5,"migration_cost_us":205.109,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2563270.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-2.96779,"migrations":708155},{"layer":"Layer 31","migration_factor":0.75,"migration_cost_us":307.663,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2608140.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-4.76987,"migrations":708155},{"layer":"Layer 31","migration_factor":1.0,"migration_cost_us":410.217,"lru_hit_rate_pct":56.2565,"lru_avg_time_ns":2653000.0,"static_avg_time_ns":2489390.0,"static_hit_rate_pct":55.9206,"lru_advantage_pct":-6.57195,"migrations":708155}],"energy":[{"layer":"Layer 15","strategy":"Static (oracle)","hit_rate_pct":55.5222,"energy_per_token_mj":40.4112,"energy_per_1k_tokens_j":40.4112,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":0.928024},{"layer":"Layer 15","strategy":"Static (profiled on first 20k)","hit_rate_pct":54.9827,"energy_per_token_mj":40.7897,"energy_per_1k_tokens_j":40.7897,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":0.0},{"layer":"Layer 15","strategy":"LRU","hit_rate_pct":59.5179,"energy_per_token_mj":37.6073,"energy_per_1k_tokens_j":37.6073,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":7.80207},{"layer":"Layer 15","strategy":"Periodic (every 100)","hit_rate_pct":58.4867,"energy_per_token_mj":38.3309,"energy_per_1k_tokens_j":38.3309,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":6.02806},{"layer":"Layer 31","strategy":"Static (oracle)","hit_rate_pct":56.2154,"energy_per_token_mj":39.9247,"energy_per_1k_tokens_j":39.9247,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":0.515419},{"layer":"Layer 31","strategy":"Static (profiled on first 20k)","hit_rate_pct":55.9206,"energy_per_token_mj":40.1316,"energy_per_1k_tokens_j":40.1316,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":0.0},{"layer":"Layer 31","strategy":"LRU","hit_rate_pct":56.2565,"energy_per_token_mj":39.8959,"energy_per_1k_tokens_j":39.8959,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":0.587245},{"layer":"Layer 31","strategy":"Periodic (every 100)","hit_rate_pct":58.4678,"energy_per_token_mj":38.3441,"energy_per_1k_tokens_j":38.3441,"cxl_energy_basis":"DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited","saving_vs_worst_pct":4.45386}],"batch":[{"batch_size":1,"mean_union_size":2.0,"union_pct_of_all_experts":25.0,"analytic_uniform_union":2.0,"pct_steps_union_fits_budget":100.0,"pct_steps_fully_resident":32.5333,"hbm_hit_rate_pct":55.2167,"bytes_per_token_mb":704.643,"time_per_token_tiered_us":5045.2,"time_per_token_hbm_only_us":820.434,"tiering_penalty_x":6.14943},{"batch_size":2,"mean_union_size":3.47567,"union_pct_of_all_experts":43.4458,"analytic_uniform_union":3.5,"pct_steps_union_fits_budget":100.0,"pct_steps_fully_resident":11.5333,"hbm_hit_rate_pct":55.1165,"bytes_per_token_mb":612.276,"time_per_token_tiered_us":4392.07,"time_per_token_hbm_only_us":712.889,"tiering_penalty_x":6.16094},{"batch_size":4,"mean_union_size":5.41033,"union_pct_of_all_experts":67.6292,"analytic_uniform_union":5.46875,"pct_steps_union_fits_budget":14.6,"pct_steps_fully_resident":1.13333,"hbm_hit_rate_pct":53.749,"bytes_per_token_mb":476.544,"time_per_token_tiered_us":3505.66,"time_per_token_hbm_only_us":554.853,"tiering_penalty_x":6.31819},{"batch_size":8,"mean_union_size":7.11367,"union_pct_of_all_experts":88.9208,"analytic_uniform_union":7.1991,"pct_steps_union_fits_budget":0.0666667,"pct_steps_fully_resident":0.0333333,"hbm_hit_rate_pct":51.9891,"bytes_per_token_mb":313.287,"time_per_token_tiered_us":2378.49,"time_per_token_hbm_only_us":364.768,"tiering_penalty_x":6.52055},{"batch_size":16,"mean_union_size":7.86167,"union_pct_of_all_experts":98.2708,"analytic_uniform_union":7.91982,"pct_steps_union_fits_budget":0.0,"pct_steps_fully_resident":0.0,"hbm_hit_rate_pct":50.6551,"bytes_per_token_mb":173.115,"time_per_token_tiered_us":1345.21,"time_per_token_hbm_only_us":201.562,"tiering_penalty_x":6.67394},{"batch_size":32,"mean_union_size":7.99367,"union_pct_of_all_experts":99.9208,"analytic_uniform_union":7.9992,"pct_steps_union_fits_budget":0.0,"pct_steps_fully_resident":0.0,"hbm_hit_rate_pct":50.0396,"bytes_per_token_mb":88.0107,"time_per_token_tiered_us":691.152,"time_per_token_hbm_only_us":102.473,"tiering_penalty_x":6.74471},{"batch_size":64,"mean_union_size":8.0,"union_pct_of_all_experts":100.0,"analytic_uniform_union":8.0,"pct_steps_union_fits_budget":0.0,"pct_steps_fully_resident":0.0,"hbm_hit_rate_pct":50.0,"bytes_per_token_mb":44.0402,"time_per_token_tiered_us":346.083,"time_per_token_hbm_only_us":51.2771,"tiering_penalty_x":6.74927},{"batch_size":128,"mean_union_size":8.0,"union_pct_of_all_experts":100.0,"analytic_uniform_union":8.0,"pct_steps_union_fits_budget":0.0,"pct_steps_fully_resident":0.0,"hbm_hit_rate_pct":50.0,"bytes_per_token_mb":22.0201,"time_per_token_tiered_us":173.042,"time_per_token_hbm_only_us":25.6386,"tiering_penalty_x":6.74927}],"scalability":[{"regime":"fixed-k (top-2)","num_experts":8,"top_k":2,"routed_fraction_pct":25.0,"budget_fraction":0.125,"experts_in_hbm":1,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":20.0813,"lru_hit_rate_pct":5.84625,"tokens_fully_resident_pct":0.0},{"regime":"fixed-k (top-2)","num_experts":8,"top_k":2,"routed_fraction_pct":25.0,"budget_fraction":0.25,"experts_in_hbm":2,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":34.51,"lru_hit_rate_pct":27.1088,"tokens_fully_resident_pct":7.495},{"regime":"fixed-k (top-2)","num_experts":8,"top_k":2,"routed_fraction_pct":25.0,"budget_fraction":0.5,"experts_in_hbm":4,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":62.0288,"lru_hit_rate_pct":53.4925,"tokens_fully_resident_pct":35.2475},{"regime":"fixed-k (top-2)","num_experts":16,"top_k":2,"routed_fraction_pct":12.5,"budget_fraction":0.125,"experts_in_hbm":2,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":19.1337,"lru_hit_rate_pct":19.7138,"tokens_fully_resident_pct":2.0075},{"regime":"fixed-k (top-2)","num_experts":16,"top_k":2,"routed_fraction_pct":12.5,"budget_fraction":0.25,"experts_in_hbm":4,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":35.9113,"lru_hit_rate_pct":32.4963,"tokens_fully_resident_pct":10.8025},{"regime":"fixed-k (top-2)","num_experts":16,"top_k":2,"routed_fraction_pct":12.5,"budget_fraction":0.5,"experts_in_hbm":8,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":61.5737,"lru_hit_rate_pct":56.8287,"tokens_fully_resident_pct":36.485},{"regime":"fixed-k (top-2)","num_experts":32,"top_k":2,"routed_fraction_pct":6.25,"budget_fraction":0.125,"experts_in_hbm":4,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":23.265,"lru_hit_rate_pct":23.4163,"tokens_fully_resident_pct":4.2725},{"regime":"fixed-k (top-2)","num_experts":32,"top_k":2,"routed_fraction_pct":6.25,"budget_fraction":0.25,"experts_in_hbm":8,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":42.3713,"lru_hit_rate_pct":36.3625,"tokens_fully_resident_pct":16.865},{"regime":"fixed-k (top-2)","num_experts":32,"top_k":2,"routed_fraction_pct":6.25,"budget_fraction":0.5,"experts_in_hbm":16,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":66.8375,"lru_hit_rate_pct":61.0312,"tokens_fully_resident_pct":44.09},{"regime":"fixed-k (top-2)","num_experts":64,"top_k":2,"routed_fraction_pct":3.125,"budget_fraction":0.125,"experts_in_hbm":8,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":21.1625,"lru_hit_rate_pct":24.4612,"tokens_fully_resident_pct":4.04},{"regime":"fixed-k (top-2)","num_experts":64,"top_k":2,"routed_fraction_pct":3.125,"budget_fraction":0.25,"experts_in_hbm":16,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":37.335,"lru_hit_rate_pct":36.9125,"tokens_fully_resident_pct":13.5325},{"regime":"fixed-k (top-2)","num_experts":64,"top_k":2,"routed_fraction_pct":3.125,"budget_fraction":0.5,"experts_in_hbm":32,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":65.1688,"lru_hit_rate_pct":60.4925,"tokens_fully_resident_pct":42.2025},{"regime":"fixed-k (top-2)","num_experts":128,"top_k":2,"routed_fraction_pct":1.5625,"budget_fraction":0.125,"experts_in_hbm":16,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":22.9887,"lru_hit_rate_pct":25.31,"tokens_fully_resident_pct":5.025},{"regime":"fixed-k (top-2)","num_experts":128,"top_k":2,"routed_fraction_pct":1.5625,"budget_fraction":0.25,"experts_in_hbm":32,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":39.725,"lru_hit_rate_pct":37.5825,"tokens_fully_resident_pct":15.6275},{"regime":"fixed-k (top-2)","num_experts":128,"top_k":2,"routed_fraction_pct":1.5625,"budget_fraction":0.5,"experts_in_hbm":64,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":66.19,"lru_hit_rate_pct":60.9888,"tokens_fully_resident_pct":43.7425},{"regime":"scaled-k (N/32)","num_experts":8,"top_k":2,"routed_fraction_pct":25.0,"budget_fraction":0.125,"experts_in_hbm":1,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":20.0813,"lru_hit_rate_pct":5.84625,"tokens_fully_resident_pct":0.0},{"regime":"scaled-k (N/32)","num_experts":8,"top_k":2,"routed_fraction_pct":25.0,"budget_fraction":0.25,"experts_in_hbm":2,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":34.51,"lru_hit_rate_pct":27.1088,"tokens_fully_resident_pct":7.495},{"regime":"scaled-k (N/32)","num_experts":8,"top_k":2,"routed_fraction_pct":25.0,"budget_fraction":0.5,"experts_in_hbm":4,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":62.0288,"lru_hit_rate_pct":53.4925,"tokens_fully_resident_pct":35.2475},{"regime":"scaled-k (N/32)","num_experts":16,"top_k":2,"routed_fraction_pct":12.5,"budget_fraction":0.125,"experts_in_hbm":2,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":19.1337,"lru_hit_rate_pct":19.7138,"tokens_fully_resident_pct":2.0075},{"regime":"scaled-k (N/32)","num_experts":16,"top_k":2,"routed_fraction_pct":12.5,"budget_fraction":0.25,"experts_in_hbm":4,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":35.9113,"lru_hit_rate_pct":32.4963,"tokens_fully_resident_pct":10.8025},{"regime":"scaled-k (N/32)","num_experts":16,"top_k":2,"routed_fraction_pct":12.5,"budget_fraction":0.5,"experts_in_hbm":8,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":61.5737,"lru_hit_rate_pct":56.8287,"tokens_fully_resident_pct":36.485},{"regime":"scaled-k (N/32)","num_experts":32,"top_k":2,"routed_fraction_pct":6.25,"budget_fraction":0.125,"experts_in_hbm":4,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":23.265,"lru_hit_rate_pct":23.4163,"tokens_fully_resident_pct":4.2725},{"regime":"scaled-k (N/32)","num_experts":32,"top_k":2,"routed_fraction_pct":6.25,"budget_fraction":0.25,"experts_in_hbm":8,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":42.3713,"lru_hit_rate_pct":36.3625,"tokens_fully_resident_pct":16.865},{"regime":"scaled-k (N/32)","num_experts":32,"top_k":2,"routed_fraction_pct":6.25,"budget_fraction":0.5,"experts_in_hbm":16,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":66.8375,"lru_hit_rate_pct":61.0312,"tokens_fully_resident_pct":44.09},{"regime":"scaled-k (N/32)","num_experts":64,"top_k":2,"routed_fraction_pct":3.125,"budget_fraction":0.125,"experts_in_hbm":8,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":21.1625,"lru_hit_rate_pct":24.4612,"tokens_fully_resident_pct":4.04},{"regime":"scaled-k (N/32)","num_experts":64,"top_k":2,"routed_fraction_pct":3.125,"budget_fraction":0.25,"experts_in_hbm":16,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":37.335,"lru_hit_rate_pct":36.9125,"tokens_fully_resident_pct":13.5325},{"regime":"scaled-k (N/32)","num_experts":64,"top_k":2,"routed_fraction_pct":3.125,"budget_fraction":0.5,"experts_in_hbm":32,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":65.1688,"lru_hit_rate_pct":60.4925,"tokens_fully_resident_pct":42.2025},{"regime":"scaled-k (N/32)","num_experts":128,"top_k":4,"routed_fraction_pct":3.125,"budget_fraction":0.125,"experts_in_hbm":16,"hbm_gb_per_layer":0.352322,"cxl_offload_gb_all_layers":78.92,"static_hit_rate_pct":22.9988,"lru_hit_rate_pct":18.9737,"tokens_fully_resident_pct":0.1975},{"regime":"scaled-k (N/32)","num_experts":128,"top_k":4,"routed_fraction_pct":3.125,"budget_fraction":0.25,"experts_in_hbm":32,"hbm_gb_per_layer":0.704643,"cxl_offload_gb_all_layers":67.6457,"static_hit_rate_pct":39.4706,"lru_hit_rate_pct":32.5669,"tokens_fully_resident_pct":2.175},{"regime":"scaled-k (N/32)","num_experts":128,"top_k":4,"routed_fraction_pct":3.125,"budget_fraction":0.5,"experts_in_hbm":64,"hbm_gb_per_layer":1.40929,"cxl_offload_gb_all_layers":45.0972,"static_hit_rate_pct":66.0844,"lru_hit_rate_pct":57.9419,"tokens_fully_resident_pct":18.615}],"pooling":[{"replicas":1,"pool_links":1,"private_cxl_gb":45.0972,"pooled_cxl_gb":45.0972,"capacity_saved_gb":0.0,"consolidation_ratio":1.0,"per_replica_pool_bw_gbps":64.0,"access_time_private_us":2319.71,"access_time_pooled_us":2319.71,"pooled_slowdown_x":1.0,"assumed_hit_rate_pct":59.5179},{"replicas":1,"pool_links":2,"private_cxl_gb":45.0972,"pooled_cxl_gb":45.0972,"capacity_saved_gb":0.0,"consolidation_ratio":1.0,"per_replica_pool_bw_gbps":128.0,"access_time_private_us":2319.71,"access_time_pooled_us":1281.97,"pooled_slowdown_x":0.55264,"assumed_hit_rate_pct":59.5179},{"replicas":1,"pool_links":4,"private_cxl_gb":45.0972,"pooled_cxl_gb":45.0972,"capacity_saved_gb":0.0,"consolidation_ratio":1.0,"per_replica_pool_bw_gbps":256.0,"access_time_private_us":2319.71,"access_time_pooled_us":763.092,"pooled_slowdown_x":0.328959,"assumed_hit_rate_pct":59.5179},{"replicas":1,"pool_links":8,"private_cxl_gb":45.0972,"pooled_cxl_gb":45.0972,"capacity_saved_gb":0.0,"consolidation_ratio":1.0,"per_replica_pool_bw_gbps":512.0,"access_time_private_us":2319.71,"access_time_pooled_us":503.655,"pooled_slowdown_x":0.217119,"assumed_hit_rate_pct":59.5179},{"replicas":2,"pool_links":1,"private_cxl_gb":90.1943,"pooled_cxl_gb":45.0972,"capacity_saved_gb":45.0972,"consolidation_ratio":1.33333,"per_replica_pool_bw_gbps":32.0,"access_time_private_us":2319.71,"access_time_pooled_us":4395.21,"pooled_slowdown_x":1.89472,"assumed_hit_rate_pct":59.5179},{"replicas":2,"pool_links":2,"private_cxl_gb":90.1943,"pooled_cxl_gb":45.0972,"capacity_saved_gb":45.0972,"consolidation_ratio":1.33333,"per_replica_pool_bw_gbps":64.0,"access_time_private_us":2319.71,"access_time_pooled_us":2319.71,"pooled_slowdown_x":1.0,"assumed_hit_rate_pct":59.5179},{"replicas":2,"pool_links":4,"private_cxl_gb":90.1943,"pooled_cxl_gb":45.0972,"capacity_saved_gb":45.0972,"consolidation_ratio":1.33333,"per_replica_pool_bw_gbps":128.0,"access_time_private_us":2319.71,"access_time_pooled_us":1281.97,"pooled_slowdown_x":0.55264,"assumed_hit_rate_pct":59.5179},{"replicas":2,"pool_links":8,"private_cxl_gb":90.1943,"pooled_cxl_gb":45.0972,"capacity_saved_gb":45.0972,"consolidation_ratio":1.33333,"per_replica_pool_bw_gbps":256.0,"access_time_private_us":2319.71,"access_time_pooled_us":763.092,"pooled_slowdown_x":0.328959,"assumed_hit_rate_pct":59.5179},{"replicas":4,"pool_links":1,"private_cxl_gb":180.389,"pooled_cxl_gb":45.0972,"capacity_saved_gb":135.291,"consolidation_ratio":1.6,"per_replica_pool_bw_gbps":16.0,"access_time_private_us":2319.71,"access_time_pooled_us":8546.2,"pooled_slowdown_x":3.68416,"assumed_hit_rate_pct":59.5179},{"replicas":4,"pool_links":2,"private_cxl_gb":180.389,"pooled_cxl_gb":45.0972,"capacity_saved_gb":135.291,"consolidation_ratio":1.6,"per_replica_pool_bw_gbps":32.0,"access_time_private_us":2319.71,"access_time_pooled_us":4395.21,"pooled_slowdown_x":1.89472,"assumed_hit_rate_pct":59.5179},{"replicas":4,"pool_links":4,"private_cxl_gb":180.389,"pooled_cxl_gb":45.0972,"capacity_saved_gb":135.291,"consolidation_ratio":1.6,"per_replica_pool_bw_gbps":64.0,"access_time_private_us":2319.71,"access_time_pooled_us":2319.71,"pooled_slowdown_x":1.0,"assumed_hit_rate_pct":59.5179},{"replicas":4,"pool_links":8,"private_cxl_gb":180.389,"pooled_cxl_gb":45.0972,"capacity_saved_gb":135.291,"consolidation_ratio":1.6,"per_replica_pool_bw_gbps":128.0,"access_time_private_us":2319.71,"access_time_pooled_us":1281.97,"pooled_slowdown_x":0.55264,"assumed_hit_rate_pct":59.5179},{"replicas":8,"pool_links":1,"private_cxl_gb":360.777,"pooled_cxl_gb":45.0972,"capacity_saved_gb":315.68,"consolidation_ratio":1.77778,"per_replica_pool_bw_gbps":8.0,"access_time_private_us":2319.71,"access_time_pooled_us":16848.2,"pooled_slowdown_x":7.26305,"assumed_hit_rate_pct":59.5179},{"replicas":8,"pool_links":2,"private_cxl_gb":360.777,"pooled_cxl_gb":45.0972,"capacity_saved_gb":315.68,"consolidation_ratio":1.77778,"per_replica_pool_bw_gbps":16.0,"access_time_private_us":2319.71,"access_time_pooled_us":8546.2,"pooled_slowdown_x":3.68416,"assumed_hit_rate_pct":59.5179},{"replicas":8,"pool_links":4,"private_cxl_gb":360.777,"pooled_cxl_gb":45.0972,"capacity_saved_gb":315.68,"consolidation_ratio":1.77778,"per_replica_pool_bw_gbps":32.0,"access_time_private_us":2319.71,"access_time_pooled_us":4395.21,"pooled_slowdown_x":1.89472,"assumed_hit_rate_pct":59.5179},{"replicas":8,"pool_links":8,"private_cxl_gb":360.777,"pooled_cxl_gb":45.0972,"capacity_saved_gb":315.68,"consolidation_ratio":1.77778,"per_replica_pool_bw_gbps":64.0,"access_time_private_us":2319.71,"access_time_pooled_us":2319.71,"pooled_slowdown_x":1.0,"assumed_hit_rate_pct":59.5179},{"replicas":16,"pool_links":1,"private_cxl_gb":721.555,"pooled_cxl_gb":45.0972,"capacity_saved_gb":676.457,"consolidation_ratio":1.88235,"per_replica_pool_bw_gbps":4.0,"access_time_private_us":2319.71,"access_time_pooled_us":33452.2,"pooled_slowdown_x":14.4208,"assumed_hit_rate_pct":59.5179},{"replicas":16,"pool_links":2,"private_cxl_gb":721.555,"pooled_cxl_gb":45.0972,"capacity_saved_gb":676.457,"consolidation_ratio":1.88235,"per_replica_pool_bw_gbps":8.0,"access_time_private_us":2319.71,"access_time_pooled_us":16848.2,"pooled_slowdown_x":7.26305,"assumed_hit_rate_pct":59.5179},{"replicas":16,"pool_links":4,"private_cxl_gb":721.555,"pooled_cxl_gb":45.0972,"capacity_saved_gb":676.457,"consolidation_ratio":1.88235,"per_replica_pool_bw_gbps":16.0,"access_time_private_us":2319.71,"access_time_pooled_us":8546.2,"pooled_slowdown_x":3.68416,"assumed_hit_rate_pct":59.5179},{"replicas":16,"pool_links":8,"private_cxl_gb":721.555,"pooled_cxl_gb":45.0972,"capacity_saved_gb":676.457,"consolidation_ratio":1.88235,"per_replica_pool_bw_gbps":32.0,"access_time_private_us":2319.71,"access_time_pooled_us":4395.21,"pooled_slowdown_x":1.89472,"assumed_hit_rate_pct":59.5179},{"replicas":32,"pool_links":1,"private_cxl_gb":1443.11,"pooled_cxl_gb":45.0972,"capacity_saved_gb":1398.01,"consolidation_ratio":1.93939,"per_replica_pool_bw_gbps":2.0,"access_time_private_us":2319.71,"access_time_pooled_us":66660.1,"pooled_slowdown_x":28.7363,"assumed_hit_rate_pct":59.5179},{"replicas":32,"pool_links":2,"private_cxl_gb":1443.11,"pooled_cxl_gb":45.0972,"capacity_saved_gb":1398.01,"consolidation_ratio":1.93939,"per_replica_pool_bw_gbps":4.0,"access_time_private_us":2319.71,"access_time_pooled_us":33452.2,"pooled_slowdown_x":14.4208,"assumed_hit_rate_pct":59.5179},{"replicas":32,"pool_links":4,"private_cxl_gb":1443.11,"pooled_cxl_gb":45.0972,"capacity_saved_gb":1398.01,"consolidation_ratio":1.93939,"per_replica_pool_bw_gbps":8.0,"access_time_private_us":2319.71,"access_time_pooled_us":16848.2,"pooled_slowdown_x":7.26305,"assumed_hit_rate_pct":59.5179},{"replicas":32,"pool_links":8,"private_cxl_gb":1443.11,"pooled_cxl_gb":45.0972,"capacity_saved_gb":1398.01,"consolidation_ratio":1.93939,"per_replica_pool_bw_gbps":16.0,"access_time_private_us":2319.71,"access_time_pooled_us":8546.2,"pooled_slowdown_x":3.68416,"assumed_hit_rate_pct":59.5179}],"prefetch":[{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"aggressive","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.6212,"hit_rate_gain_pts":3.11282,"prefetch_accuracy_pct":33.4994,"cxl_traffic_multiplier":1.15261,"energy_multiplier":1.13801},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"permissive","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.6212,"hit_rate_gain_pts":3.11282,"prefetch_accuracy_pct":33.5001,"cxl_traffic_multiplier":1.1526,"energy_multiplier":1.138},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"moderate","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.621,"hit_rate_gain_pts":3.11264,"prefetch_accuracy_pct":33.5007,"cxl_traffic_multiplier":1.15259,"energy_multiplier":1.13799},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"conservative","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.6198,"hit_rate_gain_pts":3.1115,"prefetch_accuracy_pct":33.5051,"cxl_traffic_multiplier":1.1525,"energy_multiplier":1.13792},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"strict","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":60.7592,"hit_rate_gain_pts":1.25084,"prefetch_accuracy_pct":36.8463,"cxl_traffic_multiplier":1.05295,"energy_multiplier":1.0483},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"aggressive","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.2825,"hit_rate_gain_pts":2.77416,"prefetch_accuracy_pct":38.3625,"cxl_traffic_multiplier":1.11008,"energy_multiplier":1.10084},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"permissive","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.2821,"hit_rate_gain_pts":2.7738,"prefetch_accuracy_pct":38.3635,"cxl_traffic_multiplier":1.11006,"energy_multiplier":1.10082},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"moderate","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.2806,"hit_rate_gain_pts":2.77229,"prefetch_accuracy_pct":38.3837,"cxl_traffic_multiplier":1.10991,"energy_multiplier":1.10069},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"conservative","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":62.2805,"hit_rate_gain_pts":2.77217,"prefetch_accuracy_pct":38.3878,"cxl_traffic_multiplier":1.10988,"energy_multiplier":1.10067},{"dataset":"Mixtral L15 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"strict","lru_hit_rate_pct":59.5083,"prefetch_hit_rate_pct":61.1399,"hit_rate_gain_pts":1.63152,"prefetch_accuracy_pct":41.6314,"cxl_traffic_multiplier":1.05649,"energy_multiplier":1.05226},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"aggressive","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":61.1555,"hit_rate_gain_pts":4.89505,"prefetch_accuracy_pct":41.753,"cxl_traffic_multiplier":1.15612,"energy_multiplier":1.14716},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"permissive","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":61.1554,"hit_rate_gain_pts":4.89499,"prefetch_accuracy_pct":41.7532,"cxl_traffic_multiplier":1.15612,"energy_multiplier":1.14715},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"moderate","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":61.1548,"hit_rate_gain_pts":4.89433,"prefetch_accuracy_pct":41.7514,"cxl_traffic_multiplier":1.15611,"energy_multiplier":1.14714},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"conservative","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":61.1548,"hit_rate_gain_pts":4.89433,"prefetch_accuracy_pct":41.7514,"cxl_traffic_multiplier":1.15611,"energy_multiplier":1.14714},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":1,"gating":"strict","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":60.9851,"hit_rate_gain_pts":4.72469,"prefetch_accuracy_pct":41.9741,"cxl_traffic_multiplier":1.14933,"energy_multiplier":1.14085},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"aggressive","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":60.8792,"hit_rate_gain_pts":4.61878,"prefetch_accuracy_pct":42.2554,"cxl_traffic_multiplier":1.14431,"energy_multiplier":1.13623},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"permissive","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":60.8785,"hit_rate_gain_pts":4.61806,"prefetch_accuracy_pct":42.2541,"cxl_traffic_multiplier":1.14429,"energy_multiplier":1.13622},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"moderate","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":60.8747,"hit_rate_gain_pts":4.61426,"prefetch_accuracy_pct":42.256,"cxl_traffic_multiplier":1.14416,"energy_multiplier":1.1361},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"conservative","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":60.8747,"hit_rate_gain_pts":4.61426,"prefetch_accuracy_pct":42.256,"cxl_traffic_multiplier":1.14416,"energy_multiplier":1.1361},{"dataset":"Mixtral L31 (real)","experts":8,"top_k":2,"markov_order":2,"gating":"strict","lru_hit_rate_pct":56.2604,"prefetch_hit_rate_pct":60.4279,"hit_rate_gain_pts":4.16751,"prefetch_accuracy_pct":43.4202,"cxl_traffic_multiplier":1.12416,"energy_multiplier":1.11766},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":1,"gating":"aggressive","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":50.8767,"hit_rate_gain_pts":0.0441667,"prefetch_accuracy_pct":25.8537,"cxl_traffic_multiplier":1.00258,"energy_multiplier":1.00239},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":1,"gating":"permissive","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":50.8742,"hit_rate_gain_pts":0.0416667,"prefetch_accuracy_pct":25.0,"cxl_traffic_multiplier":1.00254,"energy_multiplier":1.00236},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":1,"gating":"moderate","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":50.8717,"hit_rate_gain_pts":0.0391667,"prefetch_accuracy_pct":25.0,"cxl_traffic_multiplier":1.00239,"energy_multiplier":1.00222},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":1,"gating":"conservative","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":50.8717,"hit_rate_gain_pts":0.0391667,"prefetch_accuracy_pct":25.4054,"cxl_traffic_multiplier":1.00234,"energy_multiplier":1.00217},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":1,"gating":"strict","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":50.835,"hit_rate_gain_pts":0.0025,"prefetch_accuracy_pct":33.3333,"cxl_traffic_multiplier":1.0001,"energy_multiplier":1.0001},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":2,"gating":"aggressive","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":51.2725,"hit_rate_gain_pts":0.44,"prefetch_accuracy_pct":25.5072,"cxl_traffic_multiplier":1.02614,"energy_multiplier":1.02426},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":2,"gating":"permissive","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":51.2683,"hit_rate_gain_pts":0.435833,"prefetch_accuracy_pct":25.6247,"cxl_traffic_multiplier":1.02573,"energy_multiplier":1.02389},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":2,"gating":"moderate","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":51.2375,"hit_rate_gain_pts":0.405,"prefetch_accuracy_pct":26.045,"cxl_traffic_multiplier":1.02339,"energy_multiplier":1.02174},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":2,"gating":"conservative","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":51.2125,"hit_rate_gain_pts":0.38,"prefetch_accuracy_pct":25.8211,"cxl_traffic_multiplier":1.0222,"energy_multiplier":1.02063},{"dataset":"Synthetic Mixtral-like","experts":8,"top_k":2,"markov_order":2,"gating":"strict","lru_hit_rate_pct":50.8325,"prefetch_hit_rate_pct":50.8808,"hit_rate_gain_pts":0.0483333,"prefetch_accuracy_pct":25.3275,"cxl_traffic_multiplier":1.0029,"energy_multiplier":1.00269},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":1,"gating":"aggressive","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":59.7392,"hit_rate_gain_pts":4.27833,"prefetch_accuracy_pct":38.9382,"cxl_traffic_multiplier":1.15064,"energy_multiplier":1.14137},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":1,"gating":"permissive","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":59.7392,"hit_rate_gain_pts":4.27833,"prefetch_accuracy_pct":38.95,"cxl_traffic_multiplier":1.15056,"energy_multiplier":1.1413},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":1,"gating":"moderate","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":59.7342,"hit_rate_gain_pts":4.27333,"prefetch_accuracy_pct":38.9547,"cxl_traffic_multiplier":1.15035,"energy_multiplier":1.14111},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":1,"gating":"conservative","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":59.7342,"hit_rate_gain_pts":4.27333,"prefetch_accuracy_pct":38.9547,"cxl_traffic_multiplier":1.15035,"energy_multiplier":1.14111},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":1,"gating":"strict","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":55.9558,"hit_rate_gain_pts":0.495,"prefetch_accuracy_pct":38.9764,"cxl_traffic_multiplier":1.0174,"energy_multiplier":1.01633},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":2,"gating":"aggressive","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":60.06,"hit_rate_gain_pts":4.59917,"prefetch_accuracy_pct":37.6595,"cxl_traffic_multiplier":1.17094,"energy_multiplier":1.15983},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":2,"gating":"permissive","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":60.0542,"hit_rate_gain_pts":4.59333,"prefetch_accuracy_pct":37.6992,"cxl_traffic_multiplier":1.17043,"energy_multiplier":1.15938},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":2,"gating":"moderate","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":60.0142,"hit_rate_gain_pts":4.55333,"prefetch_accuracy_pct":37.7922,"cxl_traffic_multiplier":1.16828,"energy_multiplier":1.15741},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":2,"gating":"conservative","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":60.0142,"hit_rate_gain_pts":4.55333,"prefetch_accuracy_pct":37.7922,"cxl_traffic_multiplier":1.16828,"energy_multiplier":1.15741},{"dataset":"Synthetic high-skew","experts":8,"top_k":2,"markov_order":2,"gating":"strict","lru_hit_rate_pct":55.4608,"prefetch_hit_rate_pct":57.6367,"hit_rate_gain_pts":2.17583,"prefetch_accuracy_pct":39.0985,"cxl_traffic_multiplier":1.07609,"energy_multiplier":1.07144},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":1,"gating":"aggressive","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.8542,"hit_rate_gain_pts":6.56083,"prefetch_accuracy_pct":33.0687,"cxl_traffic_multiplier":1.26715,"energy_multiplier":1.2528},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":1,"gating":"permissive","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.8533,"hit_rate_gain_pts":6.56,"prefetch_accuracy_pct":33.0687,"cxl_traffic_multiplier":1.26712,"energy_multiplier":1.25277},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":1,"gating":"moderate","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.8508,"hit_rate_gain_pts":6.5575,"prefetch_accuracy_pct":33.0853,"cxl_traffic_multiplier":1.26682,"energy_multiplier":1.25249},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":1,"gating":"conservative","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.8475,"hit_rate_gain_pts":6.55417,"prefetch_accuracy_pct":33.0824,"cxl_traffic_multiplier":1.26671,"energy_multiplier":1.2524},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":1,"gating":"strict","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":50.315,"hit_rate_gain_pts":0.0216667,"prefetch_accuracy_pct":24.5283,"cxl_traffic_multiplier":1.00134,"energy_multiplier":1.00125},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":2,"gating":"aggressive","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.6933,"hit_rate_gain_pts":6.4,"prefetch_accuracy_pct":32.15,"cxl_traffic_multiplier":1.27173,"energy_multiplier":1.25656},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":2,"gating":"permissive","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.6917,"hit_rate_gain_pts":6.39833,"prefetch_accuracy_pct":32.174,"cxl_traffic_multiplier":1.27136,"energy_multiplier":1.25623},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":2,"gating":"moderate","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.645,"hit_rate_gain_pts":6.35167,"prefetch_accuracy_pct":32.2106,"cxl_traffic_multiplier":1.26893,"energy_multiplier":1.25396},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":2,"gating":"conservative","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":56.645,"hit_rate_gain_pts":6.35167,"prefetch_accuracy_pct":32.2174,"cxl_traffic_multiplier":1.26884,"energy_multiplier":1.25388},{"dataset":"Synthetic low-locality","experts":8,"top_k":2,"markov_order":2,"gating":"strict","lru_hit_rate_pct":50.2933,"prefetch_hit_rate_pct":50.5758,"hit_rate_gain_pts":0.2825,"prefetch_accuracy_pct":29.1237,"cxl_traffic_multiplier":1.01383,"energy_multiplier":1.01297},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":1,"gating":"aggressive","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.3817,"hit_rate_gain_pts":0.143333,"prefetch_accuracy_pct":23.9554,"cxl_traffic_multiplier":1.01016,"energy_multiplier":1.00922},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":1,"gating":"permissive","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.3792,"hit_rate_gain_pts":0.140833,"prefetch_accuracy_pct":23.9886,"cxl_traffic_multiplier":1.00997,"energy_multiplier":1.00904},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":1,"gating":"moderate","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.3713,"hit_rate_gain_pts":0.132917,"prefetch_accuracy_pct":24.3697,"cxl_traffic_multiplier":1.00922,"energy_multiplier":1.00836},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":1,"gating":"conservative","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.3288,"hit_rate_gain_pts":0.0904167,"prefetch_accuracy_pct":24.0576,"cxl_traffic_multiplier":1.00638,"energy_multiplier":1.00578},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":1,"gating":"strict","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.245,"hit_rate_gain_pts":0.00666667,"prefetch_accuracy_pct":27.1186,"cxl_traffic_multiplier":1.0004,"energy_multiplier":1.00037},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":2,"gating":"aggressive","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.6533,"hit_rate_gain_pts":0.415,"prefetch_accuracy_pct":14.9842,"cxl_traffic_multiplier":1.0526,"energy_multiplier":1.04696},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":2,"gating":"permissive","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.5767,"hit_rate_gain_pts":0.338333,"prefetch_accuracy_pct":15.7121,"cxl_traffic_multiplier":1.04055,"energy_multiplier":1.03624},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":2,"gating":"moderate","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.3408,"hit_rate_gain_pts":0.1025,"prefetch_accuracy_pct":18.4823,"cxl_traffic_multiplier":1.0101,"energy_multiplier":1.00907},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":2,"gating":"conservative","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.3358,"hit_rate_gain_pts":0.0975,"prefetch_accuracy_pct":18.2955,"cxl_traffic_multiplier":1.00973,"energy_multiplier":1.00873},{"dataset":"Synthetic fine-grained (64e/top8)","experts":64,"top_k":8,"markov_order":2,"gating":"strict","lru_hit_rate_pct":55.2383,"prefetch_hit_rate_pct":55.245,"hit_rate_gain_pts":0.00666667,"prefetch_accuracy_pct":26.2295,"cxl_traffic_multiplier":1.00042,"energy_multiplier":1.00038},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":1,"gating":"aggressive","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.52,"hit_rate_gain_pts":0.0333333,"prefetch_accuracy_pct":9.34579,"cxl_traffic_multiplier":1.00761,"energy_multiplier":1.00665},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":1,"gating":"permissive","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.52,"hit_rate_gain_pts":0.0333333,"prefetch_accuracy_pct":9.70874,"cxl_traffic_multiplier":1.00729,"energy_multiplier":1.00638},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":1,"gating":"moderate","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.5042,"hit_rate_gain_pts":0.0175,"prefetch_accuracy_pct":8.13953,"cxl_traffic_multiplier":1.00465,"energy_multiplier":1.00406},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":1,"gating":"conservative","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.4942,"hit_rate_gain_pts":0.0075,"prefetch_accuracy_pct":10.8434,"cxl_traffic_multiplier":1.00145,"energy_multiplier":1.00127},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":1,"gating":"strict","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.4867,"hit_rate_gain_pts":0.0,"prefetch_accuracy_pct":0.0,"cxl_traffic_multiplier":1.0,"energy_multiplier":1.0},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":2,"gating":"aggressive","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.8433,"hit_rate_gain_pts":0.356667,"prefetch_accuracy_pct":7.24196,"cxl_traffic_multiplier":1.10746,"energy_multiplier":1.09374},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":2,"gating":"permissive","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.7775,"hit_rate_gain_pts":0.290833,"prefetch_accuracy_pct":7.48445,"cxl_traffic_multiplier":1.08456,"energy_multiplier":1.07379},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":2,"gating":"moderate","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.555,"hit_rate_gain_pts":0.0683333,"prefetch_accuracy_pct":8.53278,"cxl_traffic_multiplier":1.01723,"energy_multiplier":1.01506},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":2,"gating":"conservative","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.5275,"hit_rate_gain_pts":0.0408333,"prefetch_accuracy_pct":8.13953,"cxl_traffic_multiplier":1.01084,"energy_multiplier":1.00947},{"dataset":"Synthetic fine-grained (60e/top4)","experts":60,"top_k":4,"markov_order":2,"gating":"strict","lru_hit_rate_pct":57.4867,"prefetch_hit_rate_pct":57.4867,"hit_rate_gain_pts":0.0,"prefetch_accuracy_pct":0.0,"cxl_traffic_multiplier":1.00002,"energy_multiplier":1.00002}]};
+/* @@DATA-END@@ */
+
+/* ==================================================================== *
+ * DATA ACCESS — nothing below contains a result; everything is read from DATA
+ * ==================================================================== */
+const D = DATA, P = D.params;
+const $ = id => document.getElementById(id);
+const pc = (v, d = 1) => `${v.toFixed(d)}%`;
+const int = v => Math.round(v).toLocaleString('en-US');
+const fmtT = ns => ns >= 1e6 ? (ns / 1e6).toFixed(2) + ' ms'
+                 : ns >= 1e3 ? (ns / 1e3).toFixed(ns >= 1e5 ? 0 : 1) + ' µs'
+                 : ns.toFixed(0) + ' ns';
+const LAYERS = ['Layer 15', 'Layer 31'];
+const real = (layer, routing, prefix) =>
+  D.real.find(r => r.layer === layer && r.routing === routing && r.strategy.startsWith(prefix));
+const resid = layer => D.residency.find(r => r.layer === layer);
+const energy = (layer, prefix) => D.energy.find(r => r.layer === layer && r.strategy.startsWith(prefix));
+
+const POL = {
+  static:   { label: 'Static (profiled)', v: '--s1' },
+  oracle:   { label: 'Static (oracle)',   v: '--muted' },
+  lru:      { label: 'LRU',               v: '--s2' },
+  periodic: { label: 'Periodic',          v: '--s3' },
+  hybrid:   { label: 'Hybrid',            v: '--s4' },
+  prefetch: { label: 'LRU + prefetch',    v: '--s5' },
+};
+const PREFIX = { static: 'Static (profiled', oracle: 'Static (oracle', lru: 'LRU', periodic: 'Periodic' };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const polColor = p => css(POL[p].v);
+const everyOf = r => (r && r.strategy.match(/every ([\d,]+)/) || [])[1];
+
+/* ==================================================================== *
+ * CHART TOOLKIT — plain SVG, redrawn at true pixel size on resize
+ * ==================================================================== */
+const NS = 'http://www.w3.org/2000/svg';
+const el = (t, a = {}) => { const n = document.createElementNS(NS, t); for (const k in a) n.setAttribute(k, a[k]); return n; };
+const tip = $('tip');
+
+function showTip(evt, title, rows) {
+  tip.innerHTML = `<div class="t">${title}</div>` + rows.map(r =>
+    `<div class="r"><i style="background:${r.c}"></i>${r.k}<b>${r.v}</b></div>`).join('');
+  tip.style.opacity = '1';
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = evt.clientX + pad, y = evt.clientY - h - pad;
+  if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+  if (y < 8) y = evt.clientY + pad;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+const hideTip = () => { tip.style.opacity = '0'; };
+
+function niceTicks(min, max, count) {
+  const span = max - min || 1;
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const out = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+const span = (vals, padFrac = 0.08) => {
+  const lo = Math.min(...vals), hi = Math.max(...vals), p = (hi - lo || 1) * padFrac;
+  return [lo - p, hi + p];
+};
+
+function frame(svg, W, H, cfg) {
+  const m = { t: 16, r: cfg.padRight ?? 16, b: cfg.xLabel ? 48 : 34, l: cfg.padLeft ?? 60 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const ink2 = css('--ink-2'), muted = css('--muted'), grid = css('--grid'), rule = css('--rule');
+  const yTicks = cfg.yTicks || niceTicks(cfg.y0, cfg.y1, 5);
+  const yOf = v => m.t + ph - ((v - cfg.y0) / (cfg.y1 - cfg.y0)) * ph;
+  yTicks.forEach(v => {
+    if (v < cfg.y0 - 1e-9 || v > cfg.y1 + 1e-9) return;
+    svg.appendChild(el('line', { x1: m.l, x2: m.l + pw, y1: yOf(v), y2: yOf(v), stroke: grid, 'stroke-width': 1 }));
+    const t = el('text', { x: m.l - 9, y: yOf(v) + 4, 'text-anchor': 'end', fill: muted,
+      'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+    t.textContent = cfg.fy ? cfg.fy(v) : v;
+    svg.appendChild(t);
+  });
+  svg.appendChild(el('line', { x1: m.l, x2: m.l + pw, y1: m.t + ph, y2: m.t + ph, stroke: rule, 'stroke-width': 1 }));
+  if (cfg.yLabel) {
+    const t = el('text', { x: 12, y: m.t + ph / 2, fill: muted, 'font-size': 10, 'font-family': 'var(--f-mono)',
+      'text-anchor': 'middle', transform: `rotate(-90 12 ${m.t + ph / 2})`, 'letter-spacing': '.1em' });
+    t.textContent = cfg.yLabel.toUpperCase();
+    svg.appendChild(t);
+  }
+  if (cfg.xLabel) {
+    const t = el('text', { x: m.l + pw / 2, y: H - 8, fill: muted, 'font-size': 10,
+      'font-family': 'var(--f-mono)', 'text-anchor': 'middle', 'letter-spacing': '.1em' });
+    t.textContent = cfg.xLabel.toUpperCase();
+    svg.appendChild(t);
+  }
+  return { m, pw, ph, yOf, ink2, muted, grid, rule };
+}
+
+/** Grouped-bar chart. groups:[{label, bars:[{key,val,color}]}] */
+function barChart(host, cfg) {
+  host.innerHTML = '';
+  const W = Math.max(300, host.clientWidth || 640), H = cfg.height || 300;
+  const svg = el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: 'display:block' });
+  const g = frame(svg, W, H, cfg);
+  const n = cfg.groups.length, gw = g.pw / n, inner = gw * 0.76;
+  const bn = cfg.groups[0].bars.length, bw = (inner - 2 * (bn - 1)) / bn;
+  const y0 = g.yOf(cfg.y0);
+  cfg.groups.forEach((grp, gi) => {
+    const gx = g.m.l + gi * gw + (gw - inner) / 2;
+    grp.bars.forEach((b, bi) => {
+      const x = gx + bi * (bw + 2), y = g.yOf(b.val), h = Math.max(2, y0 - y);
+      const r = Math.min(4, bw / 2);
+      const p = el('path', {
+        d: `M${x} ${y0} L${x} ${y + r} Q${x} ${y} ${x + r} ${y} L${x + bw - r} ${y} Q${x + bw} ${y} ${x + bw} ${y + r} L${x + bw} ${y0} Z`,
+        fill: b.color, style: 'cursor:pointer'
+      });
+      const rows = grp.bars.map(bb => ({ c: bb.color, k: bb.key, v: cfg.fv(bb.val) }));
+      p.addEventListener('pointerenter', e => showTip(e, grp.label, rows));
+      p.addEventListener('pointermove', e => showTip(e, grp.label, rows));
+      p.addEventListener('pointerleave', hideTip);
+      svg.appendChild(p);
+      if (cfg.directLabel) {
+        const t = el('text', { x: x + bw / 2, y: y - 6, 'text-anchor': 'middle', fill: g.ink2,
+          'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+        t.textContent = cfg.fv(b.val); svg.appendChild(t);
+      }
+    });
+    const t = el('text', { x: g.m.l + gi * gw + gw / 2, y: g.m.t + g.ph + 18, 'text-anchor': 'middle',
+      fill: g.muted, 'font-size': 11, 'font-family': 'var(--f-mono)' });
+    t.textContent = grp.label; svg.appendChild(t);
+  });
+  host.appendChild(svg);
+}
+
+/** Line chart. series:[{key,color,pts:[[x,y]],dashed,band:[[x,lo,hi]]}] */
+function lineChart(host, cfg) {
+  host.innerHTML = '';
+  const W = Math.max(300, host.clientWidth || 640), H = cfg.height || 300;
+  const svg = el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: 'display:block' });
+  const g = frame(svg, W, H, cfg);
+  const lg = cfg.logX === true;
+  const xr = lg ? [Math.log10(cfg.x0), Math.log10(cfg.x1)] : [cfg.x0, cfg.x1];
+  const xOf = v => g.m.l + ((lg ? Math.log10(v) : v) - xr[0]) / (xr[1] - xr[0]) * g.pw;
+  (cfg.xTicks || []).forEach(v => {
+    const t = el('text', { x: xOf(v), y: g.m.t + g.ph + 18, 'text-anchor': 'middle', fill: g.muted,
+      'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+    t.textContent = cfg.fx ? cfg.fx(v) : v; svg.appendChild(t);
+  });
+  (cfg.rules || []).forEach(r => {
+    svg.appendChild(el('line', { x1: g.m.l, x2: g.m.l + g.pw, y1: g.yOf(r.y), y2: g.yOf(r.y),
+      stroke: r.color, 'stroke-width': 2, 'stroke-dasharray': '5 5', opacity: .85 }));
+  });
+  cfg.series.forEach(s => {
+    if (s.band) {
+      const up = s.band.map(([x, , hi]) => `${xOf(x)},${g.yOf(hi)}`);
+      const dn = s.band.slice().reverse().map(([x, lo]) => `${xOf(x)},${g.yOf(lo)}`);
+      svg.appendChild(el('polygon', { points: up.concat(dn).join(' '), fill: s.color, opacity: .14 }));
+    }
+    svg.appendChild(el('polyline', {
+      points: s.pts.map(([x, y]) => `${xOf(x)},${g.yOf(y)}`).join(' '),
+      fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      ...(s.dashed ? { 'stroke-dasharray': '5 5' } : {})
+    }));
+    s.pts.forEach(([x, y]) => {
+      svg.appendChild(el('circle', { cx: xOf(x), cy: g.yOf(y), r: 4.2, fill: s.color,
+        stroke: css('--surface'), 'stroke-width': 2 }));
+    });
+  });
+  const xs = [...new Set(cfg.series.flatMap(s => s.pts.map(p => p[0])))];
+  const cross = el('line', { y1: g.m.t, y2: g.m.t + g.ph, stroke: g.rule, 'stroke-width': 1, opacity: 0 });
+  svg.appendChild(cross);
+  const hit = el('rect', { x: g.m.l, y: g.m.t, width: g.pw, height: g.ph, fill: 'transparent', style: 'cursor:crosshair' });
+  hit.addEventListener('pointermove', e => {
+    const bx = svg.getBoundingClientRect();
+    const px = (e.clientX - bx.left) * (W / bx.width);
+    let best = xs[0], bd = Infinity;
+    xs.forEach(x => { const d = Math.abs(xOf(x) - px); if (d < bd) { bd = d; best = x; } });
+    cross.setAttribute('x1', xOf(best)); cross.setAttribute('x2', xOf(best)); cross.setAttribute('opacity', 1);
+    showTip(e, cfg.tipTitle(best), cfg.series.map(s => {
+      const p = s.pts.find(q => q[0] === best);
+      return p ? { c: s.color, k: s.key, v: cfg.fv(p[1]) } : null;
+    }).filter(Boolean));
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('opacity', 0); hideTip(); });
+  svg.appendChild(hit);
+  host.appendChild(svg);
+}
+
+/** Dot plot. rows:[{label, dots:[{key,val,color,hollow}]}] */
+function dotPlot(host, cfg) {
+  host.innerHTML = '';
+  const W = Math.max(300, host.clientWidth || 640);
+  const rowH = cfg.rowH || 46, labelW = cfg.labelW || 132;
+  const H = rowH * cfg.rows.length + 46;
+  const svg = el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: 'display:block' });
+  const m = { t: 10, r: 18, l: labelW, b: 36 }, pw = W - m.l - m.r;
+  const muted = css('--muted'), grid = css('--grid'), rule = css('--rule'), ink2 = css('--ink-2');
+  const xOf = v => m.l + (v - cfg.x0) / (cfg.x1 - cfg.x0) * pw;
+  const plotH = rowH * cfg.rows.length;
+  (cfg.xTicks || niceTicks(cfg.x0, cfg.x1, 5)).forEach(v => {
+    if (v < cfg.x0 || v > cfg.x1) return;
+    svg.appendChild(el('line', { x1: xOf(v), x2: xOf(v), y1: m.t, y2: m.t + plotH, stroke: grid, 'stroke-width': 1 }));
+    const t = el('text', { x: xOf(v), y: m.t + plotH + 18, 'text-anchor': 'middle', fill: muted,
+      'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+    t.textContent = cfg.fx ? cfg.fx(v) : v; svg.appendChild(t);
+  });
+  if (cfg.xLabel) {
+    const t = el('text', { x: m.l + pw / 2, y: H - 6, 'text-anchor': 'middle', fill: muted,
+      'font-size': 10, 'font-family': 'var(--f-mono)', 'letter-spacing': '.1em' });
+    t.textContent = cfg.xLabel.toUpperCase(); svg.appendChild(t);
+  }
+  cfg.rows.forEach((row, ri) => {
+    const y = m.t + ri * rowH + rowH / 2;
+    const vals = row.dots.map(d => d.val);
+    svg.appendChild(el('line', { x1: xOf(Math.min(...vals)), x2: xOf(Math.max(...vals)), y1: y, y2: y,
+      stroke: rule, 'stroke-width': 2, 'stroke-linecap': 'round' }));
+    const lb = el('text', { x: m.l - 14, y: y + 4, 'text-anchor': 'end', fill: ink2, 'font-size': 12.5 });
+    lb.textContent = row.label; svg.appendChild(lb);
+    row.dots.forEach(d => {
+      const c = el('circle', { cx: xOf(d.val), cy: y, r: 7,
+        fill: d.hollow ? css('--surface') : d.color, stroke: d.color, 'stroke-width': 2.5, style: 'cursor:pointer' });
+      const rows = row.dots.map(dd => ({ c: dd.color, k: dd.key, v: cfg.fv(dd.val) }));
+      c.addEventListener('pointerenter', e => showTip(e, row.label, rows));
+      c.addEventListener('pointermove', e => showTip(e, row.label, rows));
+      c.addEventListener('pointerleave', hideTip);
+      svg.appendChild(c);
+    });
+    if (cfg.directLabel) {
+      row.dots.forEach(d => {
+        const t = el('text', { x: xOf(d.val), y: y - 14, 'text-anchor': 'middle', fill: ink2,
+          'font-size': 10.5, 'font-family': 'var(--f-mono)' });
+        t.textContent = cfg.fv(d.val); svg.appendChild(t);
+      });
+    }
+  });
+  host.appendChild(svg);
+}
+
+function legend(host, items) {
+  host.innerHTML = items.map(i =>
+    `<span><i class="${i.line ? 'line' : ''}" style="background:${i.color}"></i>${i.key}</span>`).join('');
+}
+
+function segmented(host, onPick) {
+  host.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...host.children].forEach(c => c.setAttribute('aria-pressed', String(c === b)));
+    onPick(b.dataset);
+  });
+}
+
+const DRAWS = [];
+const register = fn => { DRAWS.push(fn); fn(); };
+const redrawAll = () => DRAWS.forEach(f => f());
+let rzT; addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(redrawAll, 140); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTimeout(redrawAll, 60));
+new MutationObserver(() => setTimeout(redrawAll, 60))
+  .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+/* ==================================================================== *
+ * IN-TEXT NUMBERS — every figure in the prose is filled from DATA here
+ * ==================================================================== */
+const B = {};
+(function bind() {
+  const r15 = resid('Layer 15'), r31 = resid('Layer 31');
+  const lru15 = real('Layer 15', 'top-2', 'LRU');
+  const cxlLatShare = P.cxl_latency_ns / P.cxl_time_ns * 100;
+  B.expert_gb = P.expert_gb_all_layers.toFixed(1);
+  B.expert_mb = (P.expert_bytes / 1e6).toFixed(1);
+  B.topk = P.top_k; B.nexp = P.num_experts; B.capk = P.capacity_k;
+  B.tokens = int(r15.tokens);
+  B.decisions = int((r15.tokens + r31.tokens) * P.top_k);
+  B.warmup = int(P.real_warmup_tokens);
+  B.hero_tok = r15.lru_all_resident_pct.toFixed(1);
+  B.hero_hit = pc(lru15.hit_rate_pct);
+  B.hero_miss = pc(r15.lru_any_miss_pct);
+  B.hero_energy = energy('Layer 15', 'LRU').saving_vs_worst_pct.toFixed(1);
+  B.hero_energy31 = pc(energy('Layer 31', 'LRU').saving_vs_worst_pct);
+  const best31 = D.energy.filter(e => e.layer === 'Layer 31')
+    .reduce((a, b) => b.saving_vs_worst_pct > a.saving_vs_worst_pct ? b : a);
+  B.hero_energy31_best = `the best policy there, ${best31.strategy.toLowerCase()}, saves ${pc(best31.saving_vs_worst_pct)}`;
+  B.hero_ratio = (P.cxl_time_ns / P.hbm_time_ns).toFixed(2);
+  B.hero_latshare = pc(cxlLatShare, 3);
+  B.rep15 = pc(r15.repeat_rate * 100); B.rep31 = pc(r31.repeat_rate * 100);
+  B.m_hbm = fmtT(P.hbm_time_ns); B.m_cxl = fmtT(P.cxl_time_ns);
+  B.m_hbm_lat = P.hbm_latency_ns + ' ns';
+  B.e_hbm = P.hbm_pj_per_bit.toFixed(3) + ' pJ/b';
+  B.e_cxl_dram = P.cxl_dram_pj_per_bit.toFixed(3) + ' pJ/b';
+  B.e_link = P.cxl_link_pj_per_bit.toFixed(1) + ' pJ/b';
+  B.e_fetch_hbm = P.hbm_fetch_mj.toFixed(2) + ' mJ';
+  B.e_fetch_cxl = P.cxl_fetch_mj.toFixed(2) + ' mJ';
+  B.e_basis = D.energy_basis;
+  B.ntrials = P.num_random_trials;
+  const svr = D.capacity.reduce((a, b) => b.smart_advantage_pct > a.smart_advantage_pct ? b : a);
+  B.svr_peak = pc(svr.smart_advantage_pct); B.svr_peak_k = svr.num_experts_in_hbm;
+  B.mig_full = fmtT(P.hbm_time_ns);
+  B.ds_ceiling = pc(D.dramsim.find(d => d.device === 'HBM2').frontend_ceiling_pct, 0);
+})();
+
+/* ==================================================================== *
+ * 0x10 — CONFIGURATOR
+ * ==================================================================== */
+const MIB = 1048576;
+const SIZES = [1 / 21, 1 / 8, 1 / 4, 1 / 2, 1, 2].map(f => {
+  const b = P.expert_bytes * f;
+  return { b, t: f === 1 ? `${Math.round(b / MIB)} MiB (Mixtral)` : `${Math.round(b / MIB)} MiB` };
+});
+const cfgIn = { hlat: $('c-hlat'), hbw: $('c-hbw'), clat: $('c-clat'), cbw: $('c-cbw'), size: $('c-size') };
+const DEFAULTS = { hlat: P.hbm_latency_ns, hbw: P.hbm_bandwidth_gbps, clat: P.cxl_latency_ns,
+                   cbw: P.cxl_bandwidth_gbps, size: 4 };
+const accessNs = (latNs, bwGBs, bytes) => latNs + (bytes / 1073741824) / bwGBs * 1e9;
+
+function configState() {
+  const sz = SIZES[+cfgIn.size.value];
+  const tH = accessNs(+cfgIn.hlat.value, +cfgIn.hbw.value, sz.b);
+  const tC = accessNs(+cfgIn.clat.value, +cfgIn.cbw.value, sz.b);
+  return { sz, tH, tC };
+}
+
+function drawConfig() {
+  const { sz, tH, tC } = configState();
+  $('c-hlat-rd').textContent = (+cfgIn.hlat.value).toFixed(1) + ' ns';
+  $('c-hbw-rd').textContent = cfgIn.hbw.value + ' GB/s';
+  $('c-clat-rd').textContent = (+cfgIn.clat.value).toFixed(0) + ' ns';
+  $('c-cbw-rd').textContent = cfgIn.cbw.value + ' GB/s';
+  $('c-size-rd').textContent = sz.t;
+
+  const mix = h => (h / 100) * tH + (1 - h / 100) * tC;
+  const k4 = D.capacity.find(r => r.num_experts_in_hbm === P.capacity_k);
+  $('c-ro-h').textContent = fmtT(tH);
+  $('c-ro-c').textContent = fmtT(tC);
+  $('c-ro-p').textContent = (tC / tH).toFixed(2) + '×';
+  $('c-ro-l').textContent = pc(+cfgIn.clat.value / tC * 100, 3);
+  $('c-ro-s').textContent = (mix(k4.static_hit_rate_pct) / tH).toFixed(2) + '×';
+
+  const series = [
+    { key: 'Static (demand-ranked)', color: css('--s1'), pts: D.capacity.map(r => [r.num_experts_in_hbm, mix(r.static_hit_rate_pct)]) },
+    { key: 'LRU (recency)', color: css('--s2'), pts: D.capacity.map(r => [r.num_experts_in_hbm, mix(r.lru_hit_rate_pct)]) },
+    { key: 'Random placement', color: css('--muted'), dashed: true, pts: D.capacity.map(r => [r.num_experts_in_hbm, mix(r.random_hit_rate_pct)]) },
+  ];
+  lineChart($('chart-config'), {
+    height: 320, x0: 0, x1: P.num_experts, xTicks: [...Array(P.num_experts + 1).keys()],
+    y0: 0, y1: Math.max(...series.flatMap(s => s.pts.map(p => p[1]))) * 1.06, padLeft: 64,
+    xLabel: 'Experts resident in HBM', yLabel: 'Avg expert fetch',
+    fy: fmtT, fv: fmtT, tipTitle: k => `HBM budget = ${k} of ${P.num_experts}`, series,
+  });
+  legend($('legend-config'), series.map(s => ({ key: s.key, color: s.color, line: 1 })));
+}
+function resetConfig() { for (const k in DEFAULTS) cfgIn[k].value = DEFAULTS[k]; drawConfig(); }
+Object.values(cfgIn).forEach(i => i.addEventListener('input', drawConfig));
+$('c-reset').addEventListener('click', resetConfig);
+for (const k in DEFAULTS) cfgIn[k].value = DEFAULTS[k];
+register(drawConfig);
+
+/* ==================================================================== *
+ * 0x20 — RANKED VS RANDOM
+ * ==================================================================== */
+register(() => {
+  const C = D.capacity;
+  lineChart($('chart-svr'), {
+    height: 300, x0: 0, x1: P.num_experts, xTicks: [0, 2, 4, 6, 8],
+    y0: 0, y1: Math.max(...C.map(r => r.random_avg_time_ns_mean + r.random_avg_time_ns_std)) * 1.05, padLeft: 64,
+    xLabel: 'HBM budget', yLabel: 'Avg expert fetch', fy: fmtT, fv: fmtT,
+    tipTitle: k => `HBM budget = ${k} of ${P.num_experts}`,
+    series: [
+      { key: 'Demand-ranked', color: css('--s1'), pts: C.map(r => [r.num_experts_in_hbm, r.static_avg_time_ns]) },
+      { key: 'Random (mean)', color: css('--muted'), dashed: true,
+        pts: C.map(r => [r.num_experts_in_hbm, r.random_avg_time_ns_mean]),
+        band: C.map(r => [r.num_experts_in_hbm, r.random_avg_time_ns_mean - r.random_avg_time_ns_std,
+                                               r.random_avg_time_ns_mean + r.random_avg_time_ns_std]) },
+    ],
+  });
+  legend($('legend-svr'), [
+    { key: 'Demand-ranked', color: css('--s1'), line: 1 },
+    { key: 'Random, ±1 sd', color: css('--muted'), line: 1 },
+  ]);
+  barChart($('chart-adv'), {
+    height: 300, y0: 0, y1: Math.max(...C.map(r => r.smart_advantage_pct)) * 1.18, padLeft: 44, xLabel: 'HBM budget',
+    yLabel: 'Advantage', fy: v => v + '%', fv: v => v.toFixed(2) + '%', directLabel: false,
+    groups: C.map(r => ({ label: String(r.num_experts_in_hbm),
+      bars: [{ key: 'Faster than random', val: r.smart_advantage_pct, color: css('--s3') }] })),
+  });
+});
+
+/* ==================================================================== *
+ * 0x30 — REAL TRACES, TOP-1 VS TOP-2, AND TOKEN-LEVEL RESIDENCY
+ * ==================================================================== */
+const REAL_POLS = ['static', 'oracle', 'lru', 'periodic'];
+const bestPolicy = (layer, routing) => ['static', 'lru', 'periodic']
+  .map(p => real(layer, routing, PREFIX[p])).reduce((a, b) => b.hit_rate_pct > a.hit_rate_pct ? b : a);
+(function realText() {
+  const t1 = LAYERS.map(L => `${bestPolicy(L, 'top-1').strategy} at ${L.toLowerCase()}`);
+  const top2 = LAYERS.flatMap(L => ['static', 'lru', 'periodic'].map(p => real(L, 'top-2', PREFIX[p]).hit_rate_pct));
+  B.real_verdict = `the deployable policies at both layers land within ${pc(Math.min(...top2))}&ndash;${pc(Math.max(...top2))} ` +
+    `per access (under top-1 the winners were ${t1.join(' and ')}). What separates the layers is not per-access ` +
+    `hit rate but how many tokens get <em>both</em> experts from HBM.`;
+  const r15 = resid('Layer 15'), r31 = resid('Layer 31');
+  const parts = LAYERS.map(L => {
+    const r = resid(L), lru = real(L, 'top-2', 'LRU');
+    return `at ${L.toLowerCase()} LRU hits ${pc(lru.hit_rate_pct)} of accesses but keeps both experts resident for only ` +
+      `${pc(r.lru_all_resident_pct)} of tokens (static: ${pc(r.static_all_resident_pct)})`;
+  });
+  let s = parts.join('; ') + '.';
+  const flip = LAYERS.filter(L => resid(L).static_all_resident_pct > resid(L).lru_all_resident_pct);
+  if (flip.length) s += ` At ${flip.map(l => l.toLowerCase()).join(' and ')}, static keeps <em>more</em> tokens fully resident than LRU despite a lower per-access hit rate: per-access hit rate is the wrong objective under top-2.`;
+  B.resid_note = s.charAt(0).toUpperCase() + s.slice(1);
+})();
+
+let realLayer = 'Layer 15';
+function drawReal() {
+  const vals = [];
+  const rows = REAL_POLS.map(p => {
+    const a = real(realLayer, 'top-1', PREFIX[p]), b = real(realLayer, 'top-2', PREFIX[p]);
+    vals.push(a.hit_rate_pct, b.hit_rate_pct);
+    const lbl = p === 'periodic' ? `Periodic (every ${everyOf(b)})` : POL[p].label;
+    return { label: lbl, dots: [
+      { key: 'top-1', val: a.hit_rate_pct, color: polColor(p), hollow: true },
+      { key: 'top-2', val: b.hit_rate_pct, color: polColor(p) },
+    ] };
+  });
+  const [x0, x1] = span(vals, 0.15);
+  dotPlot($('chart-real'), { rowH: 52, labelW: 170, x0, x1, xLabel: 'HBM hit rate (per access)',
+    fx: v => v.toFixed(0) + '%', fv: v => v.toFixed(2) + '%', directLabel: true, rows });
+  legend($('legend-real'), [
+    { key: 'top-1 (first choice only) — hollow', color: css('--muted') },
+    { key: 'top-2 (the real workload) — filled', color: css('--ink-2') },
+  ]);
+  $('tbody-real').innerHTML = REAL_POLS.map(p => {
+    const cells = LAYERS.flatMap(L => ['top-1', 'top-2'].map(rt => {
+      const r = real(L, rt, PREFIX[p]);
+      const iv = p === 'periodic' ? ` <span style="color:var(--muted)">(every ${everyOf(r)})</span>` : '';
+      return `<td>${r.hit_rate_pct.toFixed(2)}%${iv}</td>`;
+    }));
+    return `<tr><td><i class="cellchip" style="background:${polColor(p)}"></i>${POL[p].label}</td>${cells.join('')}</tr>`;
+  }).join('');
+}
+segmented($('real-toggle'), d => { realLayer = d.layer; drawReal(); });
+register(drawReal);
+
+register(() => {
+  const groups = LAYERS.map(L => ({ label: L, bars: [
+    { key: 'LRU, per-access hit rate', val: real(L, 'top-2', 'LRU').hit_rate_pct, color: css('--muted') },
+    { key: 'LRU, tokens fully in HBM', val: resid(L).lru_all_resident_pct, color: css('--s2') },
+    { key: 'Static (profiled), tokens fully in HBM', val: resid(L).static_all_resident_pct, color: css('--s1') },
+  ] }));
+  barChart($('chart-resid'), { height: 280, y0: 0, y1: 70, padLeft: 44, directLabel: true,
+    yLabel: 'Percent', fy: v => v + '%', fv: v => v.toFixed(1) + '%', groups });
+  legend($('legend-resid'), groups[0].bars.map(b => ({ key: b.key, color: b.color })));
+});
+
+/* ==================================================================== *
+ * 0x40 — PHASE SHIFT
+ * ==================================================================== */
+(function phaseText() {
+  const ph = D.phases, last = ph[ph.length - 1], first = ph[0];
+  const keys = ['static', 'lru', 'hybrid', 'periodic'];
+  const mean = k => ph.reduce((s, r) => s + r[`hit_rate_pct_${k}`], 0) / ph.length;
+  const best = keys.reduce((a, b) => mean(b) > mean(a) ? b : a);
+  const iv = first.periodic_interval;
+  B.phase_note = `<strong>Static decays as the hot set rotates away from it:</strong> ${pc(first.hit_rate_pct_static)} in phase 0, ` +
+    `${pc(last.hit_rate_pct_static)} by phase ${last.phase}. ` +
+    `Averaged over all phases the best policy is ${best === 'periodic' ? `periodic re-profiling (every ${int(iv)} tokens)` : best}` +
+    `, at ${pc(mean(best))}. Periodic numbers here use the interval that scored best on this trace, ${int(iv)} tokens.`;
+})();
+register(() => {
+  const ph = D.phases, keys = ['static', 'lru', 'hybrid', 'periodic'];
+  const label = k => k === 'periodic' ? `Periodic (every ${int(ph[0].periodic_interval)})` : POL[k].label;
+  const [y0, y1] = span(ph.flatMap(r => keys.map(k => r[`hit_rate_pct_${k}`])), 0.25);
+  lineChart($('chart-phase'), {
+    height: 320, x0: -0.15, x1: ph.length - 0.85, xTicks: ph.map(r => r.phase), padLeft: 52,
+    y0, y1, xLabel: 'Phase — hot experts rotate at each boundary', yLabel: 'HBM hit rate',
+    fx: v => 'Phase ' + v, fy: v => v.toFixed(0) + '%', fv: v => v.toFixed(2) + '%', tipTitle: p => 'Phase ' + p,
+    series: keys.map(k => ({ key: label(k), color: polColor(k), pts: ph.map(r => [r.phase, r[`hit_rate_pct_${k}`]]) })),
+  });
+  legend($('legend-phase'), keys.map(k => ({ key: label(k), color: polColor(k), line: 1 })));
+});
+
+/* ==================================================================== *
+ * 0x50 — REAL RE-PROFILING INTERVAL SWEEP
+ * ==================================================================== */
+const sweepOf = L => D.periodic_sweep.filter(r => r.layer === L && r.routing === 'top-2')
+  .sort((a, b) => a.interval - b.interval);
+(function ivText() {
+  const bits = LAYERS.map(L => {
+    const s = sweepOf(L), best = s.reduce((a, b) => b.hit_rate_pct > a.hit_rate_pct ? b : a);
+    return { L, s, best, stat: real(L, 'top-2', PREFIX.static).hit_rate_pct, lru: real(L, 'top-2', 'LRU').hit_rate_pct };
+  });
+  const shortest = Math.min(...D.periodic_sweep.map(r => r.interval));
+  B.iv_lede = bits.map(b => `the best interval at ${b.L.toLowerCase()} is ${int(b.best.interval)} tokens (${pc(b.best.hit_rate_pct)})`).join(', and ') +
+    (bits.every(b => b.best.interval === shortest) ? ` &mdash; the shortest interval tested.` : '.');
+  B.iv_note = '<strong>The best cadence undercuts the policy\'s own justification.</strong> ' + bits.map(b => {
+    const below = b.s.filter(r => r.hit_rate_pct < b.stat).map(r => int(r.interval));
+    return `At ${b.L.toLowerCase()}, ` + (below.length
+      ? `re-profiling every ${below.join(', ')} tokens scores <em>below</em> static placement (${pc(b.stat)})`
+      : `every tested interval beats static placement (${pc(b.stat)})`) + '.';
+  }).join(' ') + ' A very short interval approaches recency behaviour while costing more bookkeeping and migration than LRU, ' +
+    'which is the thing periodic re-profiling was meant to be cheaper than. Never quote a periodic result without its interval.';
+})();
+let ivLayer = 'Layer 15';
+function drawInterval() {
+  const s = sweepOf(ivLayer), stat = real(ivLayer, 'top-2', PREFIX.static).hit_rate_pct, lru = real(ivLayer, 'top-2', 'LRU').hit_rate_pct;
+  const [y0, y1] = span([...s.map(r => r.hit_rate_pct), stat, lru], 0.2);
+  lineChart($('chart-interval'), {
+    height: 310, logX: true, x0: s[0].interval * 0.8, x1: s[s.length - 1].interval * 1.25,
+    xTicks: s.map(r => r.interval), y0, y1, padLeft: 52,
+    xLabel: 'Tokens between re-ranks', yLabel: 'HBM hit rate',
+    fx: v => v >= 1000 ? (v / 1000) + 'k' : v, fy: v => v.toFixed(0) + '%', fv: v => v.toFixed(2) + '%',
+    tipTitle: n => `Re-profile every ${int(n)} tokens`,
+    rules: [{ y: lru, color: css('--s2') }, { y: stat, color: css('--s1') }],
+    series: [{ key: 'Periodic re-profile', color: css('--s3'), pts: s.map(r => [r.interval, r.hit_rate_pct]) }],
+  });
+  legend($('legend-interval'), [
+    { key: 'Periodic re-profile', color: css('--s3'), line: 1 },
+    { key: `LRU (${pc(lru)})`, color: css('--s2'), line: 1 },
+    { key: `Static, profiled (${pc(stat)})`, color: css('--s1'), line: 1 },
+  ]);
+}
+segmented($('iv-toggle'), d => { ivLayer = d.layer; drawInterval(); });
+register(drawInterval);
+
+/* ==================================================================== *
+ * 0x60 — MIGRATION COST
+ * ==================================================================== */
+(function migText() {
+  B.mig_lede = LAYERS.map(L => {
+    const s = D.migration.filter(r => r.layer === L).sort((a, b) => a.migration_factor - b.migration_factor);
+    const lose = s.find(r => r.lru_advantage_pct <= 0);
+    return `At ${L.toLowerCase()} LRU starts ${pc(s[0].lru_advantage_pct)} ahead` + (lose
+      ? ` and loses its lead once an install costs ${pc(lose.migration_factor * 100, 0)} of a full write (${fmtT(lose.migration_cost_us * 1e3)}).`
+      : ` and is still ${pc(s[s.length - 1].lru_advantage_pct)} ahead when an install costs a full write.`);
+  }).join(' ');
+})();
+register(() => {
+  const series = LAYERS.map((L, i) => ({ key: L, color: css(i ? '--s4' : '--s2'),
+    pts: D.migration.filter(r => r.layer === L).map(r => [r.migration_factor * 100, r.lru_advantage_pct]) }));
+  const [y0, y1] = span([0, ...series.flatMap(s => s.pts.map(p => p[1]))], 0.1);
+  lineChart($('chart-mig'), {
+    height: 300, x0: 0, x1: 100, xTicks: [0, 10, 20, 30, 40, 50, 75, 100], y0, y1, padLeft: 52,
+    xLabel: 'Migration cost, % of a full HBM write', yLabel: 'LRU faster than static',
+    fx: v => v + '%', fy: v => v.toFixed(0) + '%', fv: v => v.toFixed(2) + '%', tipTitle: f => `Install costs ${f}% of a full write`,
+    rules: [{ y: 0, color: css('--muted') }], series,
+  });
+  legend($('legend-mig'), [...series.map(s => ({ key: s.key, color: s.color, line: 1 })),
+    { key: 'Break-even with static', color: css('--muted'), line: 1 }]);
+});
+
+/* ==================================================================== *
+ * 0x70 — ENERGY
+ * ==================================================================== */
+const E_POLS = ['static', 'oracle', 'lru', 'periodic'];
+register(() => {
+  const groups = LAYERS.map(L => ({ label: L, bars: E_POLS.map(p => {
+    const r = energy(L, PREFIX[p]);
+    return { key: r.strategy, val: r.energy_per_token_mj, color: polColor(p) };
+  }) }));
+  barChart($('chart-energy'), { height: 300, y0: 0, y1: Math.max(...D.energy.map(e => e.energy_per_token_mj)) * 1.15,
+    padLeft: 56, directLabel: true, yLabel: 'Energy per token', fy: v => v.toFixed(0) + ' mJ', fv: v => v.toFixed(2) + ' mJ', groups });
+  legend($('legend-energy'), E_POLS.map(p => ({ key: POL[p].label, color: polColor(p) })));
+  $('tbody-energy').innerHTML = D.energy.map(r => {
+    const layerRows = D.energy.filter(e => e.layer === r.layer);
+    const best = r.energy_per_token_mj === Math.min(...layerRows.map(e => e.energy_per_token_mj));
+    const p = E_POLS.find(k => r.strategy.startsWith(PREFIX[k]));
+    return `<tr${best ? ' class="win"' : ''}><td>${r.layer}</td>
+      <td style="text-align:left;font-family:var(--f-body)"><i class="cellchip" style="background:${polColor(p)}"></i>${r.strategy}</td>
+      <td>${r.hit_rate_pct.toFixed(2)}%</td><td>${r.energy_per_token_mj.toFixed(2)} mJ</td>
+      <td style="color:${r.saving_vs_worst_pct > 0 ? css('--good-ink') : css('--muted')}">${r.saving_vs_worst_pct > 0 ? '−' + r.saving_vs_worst_pct.toFixed(2) + '%' : '—'}</td></tr>`;
+  }).join('');
+  $('tbody-dramsim').innerHTML = D.dramsim.map(d => `<tr>
+      <td>${d.label} (${d.device})</td><td>${d.active_channels} of ${d.channels}</td><td>${int(d.reads)}</td>
+      <td>${d.merged_reads_pct.toFixed(2)}%</td><td>${pc(d.utilisation_pct)} <span style="color:var(--muted)">(max ${pc(d.frontend_ceiling_pct, 0)})</span></td>
+      <td>${pc(d.row_hit_rate_pct)}</td><td>${d.dynamic_pj_per_bit.toFixed(3)}</td></tr>`).join('');
+});
+
+/* ==================================================================== *
+ * 0x80 — BATCH SIZE
+ * ==================================================================== */
+(function batchText() {
+  const b = D.batch, b1 = b[0], bN = b[b.length - 1];
+  const over = b.find(r => r.pct_steps_union_fits_budget < 50);
+  const all = b.find(r => r.union_pct_of_all_experts >= 99.9);
+  B.batch_lede = `At batch ${b1.batch_size} a step needs ${b1.mean_union_size.toFixed(1)} experts; ` +
+    (over ? `from batch ${over.batch_size} most steps need more than fit in a ${P.capacity_k}-expert budget` : '') +
+    (all ? `, and by batch ${all.batch_size} essentially every expert is touched every step.` : '.');
+  B.batch_note = `<strong>Tiering is a small-batch technique.</strong> Steps that never touch CXL fall from ` +
+    `${pc(b1.pct_steps_fully_resident)} at batch ${b1.batch_size} to ${pc(bN.pct_steps_fully_resident)} at batch ${bN.batch_size}; ` +
+    `the tiered-vs-all-HBM time penalty grows from ${b1.tiering_penalty_x.toFixed(2)}× to ${bN.tiering_penalty_x.toFixed(2)}×. ` +
+    `The static hot set here is chosen on total demand, the best case for tiering.`;
+})();
+register(() => {
+  const b = D.batch;
+  const series = [
+    { key: 'Experts touched per step (% of all)', color: css('--s2'), pts: b.map(r => [r.batch_size, r.union_pct_of_all_experts]) },
+    { key: 'HBM hit rate', color: css('--s1'), pts: b.map(r => [r.batch_size, r.hbm_hit_rate_pct]) },
+    { key: 'Steps with no CXL fetch', color: css('--s3'), pts: b.map(r => [r.batch_size, r.pct_steps_fully_resident]) },
+  ];
+  lineChart($('chart-batch'), {
+    height: 300, logX: true, x0: b[0].batch_size * 0.8, x1: b[b.length - 1].batch_size * 1.25,
+    xTicks: b.map(r => r.batch_size), y0: 0, y1: 100, padLeft: 48,
+    xLabel: 'Batch size (tokens per decode step)', yLabel: 'Percent',
+    fy: v => v + '%', fv: v => v.toFixed(1) + '%', tipTitle: n => `Batch ${n}`, series,
+  });
+  legend($('legend-batch'), series.map(s => ({ key: s.key, color: s.color, line: 1 })));
+});
+
+/* ==================================================================== *
+ * 0x90 — SCALABILITY
+ * ==================================================================== */
+const FRACS = [...new Set(D.scalability.map(r => r.budget_fraction))].sort((a, b) => a - b);
+let scaleFrac = FRACS[FRACS.length - 1];
+$('scale-toggle').innerHTML = FRACS.map(f =>
+  `<button type="button" data-frac="${f}" aria-pressed="${f === scaleFrac}">HBM = ${(f * 100).toFixed(1).replace('.0', '')}%</button>`).join('');
+(function scaleText() {
+  const at = (reg, f) => D.scalability.filter(r => r.regime === reg && r.budget_fraction === f).sort((a, b) => a.num_experts - b.num_experts);
+  const regs = [...new Set(D.scalability.map(r => r.regime))];
+  const fx = at(regs[0], scaleFrac), sc = at(regs[1], scaleFrac);
+  const fxv = fx.map(r => r.tokens_fully_resident_pct), last = sc[sc.length - 1];
+  B.scale_lede = `with top-2 fixed the share of tokens with every expert resident stays within ${pc(Math.min(...fxv))}&ndash;${pc(Math.max(...fxv))} ` +
+    `from ${fx[0].num_experts} to ${fx[fx.length - 1].num_experts} experts; when top-k grows with N it falls to ` +
+    `${pc(last.tokens_fully_resident_pct)} at ${last.num_experts} experts, top-${last.top_k} (HBM holding ${(scaleFrac * 100).toFixed(1).replace('.0', '')}% of experts).`;
+})();
+function drawScale() {
+  const regs = [...new Set(D.scalability.map(r => r.regime))];
+  const series = regs.map((reg, i) => ({ key: reg, color: css(i ? '--s5' : '--s1'),
+    pts: D.scalability.filter(r => r.regime === reg && r.budget_fraction === scaleFrac)
+      .sort((a, b) => a.num_experts - b.num_experts).map(r => [r.num_experts, r.tokens_fully_resident_pct]),
+    topk: D.scalability.filter(r => r.regime === reg && r.budget_fraction === scaleFrac) }));
+  const ns = [...new Set(D.scalability.map(r => r.num_experts))].sort((a, b) => a - b);
+  lineChart($('chart-scale'), {
+    height: 300, logX: true, x0: ns[0] * 0.8, x1: ns[ns.length - 1] * 1.25, xTicks: ns,
+    y0: 0, y1: Math.max(5, ...series.flatMap(s => s.pts.map(p => p[1]))) * 1.15, padLeft: 48,
+    xLabel: 'Experts per layer', yLabel: 'Tokens fully in HBM',
+    fy: v => v.toFixed(0) + '%', fv: v => v.toFixed(1) + '%',
+    tipTitle: n => `${n} experts (${series.map(s => `${s.key.split(' ')[0]}: top-${(s.topk.find(r => r.num_experts === n) || {}).top_k}`).join(', ')})`,
+    series,
+  });
+  legend($('legend-scale'), series.map(s => ({ key: s.key, color: s.color, line: 1 })));
+}
+segmented($('scale-toggle'), d => { scaleFrac = +d.frac; drawScale(); });
+register(drawScale);
+
+/* ==================================================================== *
+ * 0xA0 — POOLING
+ * ==================================================================== */
+(function poolText() {
+  const one = D.pooling.filter(r => r.pool_links === 1).sort((a, b) => a.replicas - b.replicas);
+  const big = one[one.length - 1];
+  const hr = D.pooling[0].assumed_hit_rate_pct;
+  B.pool_lede = `At ${big.replicas} replicas pooling removes ${big.capacity_saved_gb.toFixed(0)} GB of duplicated cold-expert capacity ` +
+    `(${big.consolidation_ratio.toFixed(2)}× consolidation of total memory) &mdash; but every replica now shares the pool's links.`;
+  const ok = [...new Set(D.pooling.map(r => r.replicas))].sort((a, b) => a - b).map(R => {
+    const fit = D.pooling.filter(r => r.replicas === R && r.pooled_slowdown_x <= 1.05).sort((a, b) => a.pool_links - b.pool_links)[0];
+    return `${R}: ${fit ? fit.pool_links + ' link' + (fit.pool_links > 1 ? 's' : '') : '&gt;' + Math.max(...D.pooling.map(r => r.pool_links))}`;
+  });
+  B.pool_note = `<strong>Pooling wins on capacity until link bandwidth runs out.</strong> With one link, ${big.replicas} replicas see a ` +
+    `${big.pooled_slowdown_x.toFixed(1)}× slower average expert fetch. Links needed to stay within 5% of private CXL, by replica count &mdash; ${ok.join(' · ')}. ` +
+    `Assumes a ${pc(hr)} HBM hit rate (layer 15, top-2, LRU, measured).`;
+})();
+register(() => {
+  const one = D.pooling.filter(r => r.pool_links === 1).sort((a, b) => a.replicas - b.replicas);
+  barChart($('chart-pool-cap'), { height: 280, y0: 0, y1: Math.max(...one.map(r => r.private_cxl_gb)) * 1.1, padLeft: 56,
+    xLabel: 'Replicas', yLabel: 'CXL capacity', fy: v => v.toFixed(0) + ' GB', fv: v => v.toFixed(0) + ' GB',
+    groups: one.map(r => ({ label: String(r.replicas), bars: [
+      { key: 'Private CXL per replica', val: r.private_cxl_gb, color: css('--s2') },
+      { key: 'One pooled copy', val: r.pooled_cxl_gb, color: css('--s3') }] })) });
+  legend($('legend-pool-cap'), [{ key: 'Private (one copy per replica)', color: css('--s2') }, { key: 'Pooled (one shared copy)', color: css('--s3') }]);
+
+  const links = [...new Set(D.pooling.map(r => r.pool_links))].sort((a, b) => a - b);
+  const reps = [...new Set(D.pooling.map(r => r.replicas))].sort((a, b) => a - b);
+  const cols = ['--s1', '--s2', '--s3', '--s4', '--s5'];
+  const series = links.map((l, i) => ({ key: `${l} link${l > 1 ? 's' : ''}`, color: css(cols[i % cols.length]),
+    pts: D.pooling.filter(r => r.pool_links === l).sort((a, b) => a.replicas - b.replicas).map(r => [r.replicas, r.pooled_slowdown_x]) }));
+  lineChart($('chart-pool-bw'), { height: 280, logX: true, x0: reps[0] * 0.8, x1: reps[reps.length - 1] * 1.25, xTicks: reps,
+    y0: 0, y1: Math.max(...D.pooling.map(r => r.pooled_slowdown_x)) * 1.08, padLeft: 44,
+    xLabel: 'Replicas sharing the pool', yLabel: 'Slowdown vs private', fy: v => v.toFixed(0) + '×', fv: v => v.toFixed(2) + '×',
+    tipTitle: n => `${n} replicas`, rules: [{ y: 1, color: css('--muted') }], series });
+  legend($('legend-pool-bw'), series.map(s => ({ key: s.key, color: s.color, line: 1 })));
+});
+
+/* ==================================================================== *
+ * 0xB0 — PREFETCH
+ * ==================================================================== */
+const pfBest = [...new Set(D.prefetch.map(r => r.dataset))].map(ds => D.prefetch.filter(r => r.dataset === ds)
+  .reduce((a, b) => b.hit_rate_gain_pts > a.hit_rate_gain_pts ? b : a));
+(function pfText() {
+  B.pf_ndata = pfBest.length; B.pf_nruns = D.prefetch.length;
+  const acc = D.prefetch.reduce((s, r) => s + r.prefetch_accuracy_pct, 0) / D.prefetch.length;
+  const realBest = pfBest.filter(r => /real/.test(r.dataset));
+  B.pf_lede = `Mean prediction accuracy is ${pc(acc)}. On the real traces the best setting gains ` +
+    realBest.map(r => `${r.hit_rate_gain_pts.toFixed(1)} points (${r.dataset.replace(' (real)', '')}) for ${pc((r.energy_multiplier - 1) * 100, 0)} more memory energy`).join(' and ') + '.';
+})();
+register(() => {
+  const all = pfBest.flatMap(r => [r.lru_hit_rate_pct, r.prefetch_hit_rate_pct]);
+  const [x0, x1] = span(all, 0.1);
+  dotPlot($('chart-prefetch'), { rowH: 40, labelW: 236, x0, x1, xLabel: 'Hit rate (latency hidden)',
+    fx: v => v.toFixed(0) + '%', fv: v => v.toFixed(2) + '%',
+    rows: pfBest.map(r => ({ label: r.dataset, dots: [
+      { key: 'LRU alone', val: r.lru_hit_rate_pct, color: css('--s5'), hollow: true },
+      { key: 'LRU + prefetch (best)', val: r.prefetch_hit_rate_pct, color: css('--s5') }] })) });
+  $('tbody-prefetch').innerHTML = pfBest.map(r => `<tr><td>${r.dataset}</td><td>${pc(r.lru_hit_rate_pct)}</td>
+    <td>+${r.hit_rate_gain_pts.toFixed(2)} pts</td><td style="font-family:var(--f-body)">order ${r.markov_order}, ${r.gating}</td>
+    <td>${pc(r.prefetch_accuracy_pct)}</td><td>${r.cxl_traffic_multiplier.toFixed(2)}×</td><td>${r.energy_multiplier.toFixed(2)}×</td></tr>`).join('');
+});
+
+/* ==================================================================== *
+ * 0xC0 — ROBUSTNESS
+ * ==================================================================== */
+const robKey = s => ({ Static: 'static', Lru: 'lru', Hybrid: 'hybrid', Periodic: 'periodic' })[s] || 'static';
+(function robText() {
+  const held = D.robustness.every(r => r.dataset1_rank === r.dataset2_rank);
+  const r0 = D.robustness[0];
+  B.rob_lede = (held ? 'Every policy holds its rank.' : 'The ranking changes between datasets &mdash; evidence that the best policy depends on workload skew.') +
+    ` Periodic re-profiling uses its best interval on each dataset (${int(r0.dataset1_periodic_interval)} and ${int(r0.dataset2_periodic_interval)} tokens).`;
+})();
+register(() => {
+  const R = D.robustness;
+  const [y0, y1] = span(R.flatMap(r => [r.dataset1_hit_rate_pct, r.dataset2_hit_rate_pct]), 0.15);
+  lineChart($('chart-robust'), {
+    height: 320, x0: 0.86, x1: 2.14, xTicks: [1, 2], padLeft: 52, padRight: 26, y0, y1,
+    yLabel: 'Overall hit rate', fx: v => 'Dataset ' + v, fy: v => v.toFixed(0) + '%', fv: v => v.toFixed(2) + '%',
+    tipTitle: d => 'Dataset ' + d,
+    series: R.map(r => ({ key: POL[robKey(r.strategy)].label, color: polColor(robKey(r.strategy)),
+      pts: [[1, r.dataset1_hit_rate_pct], [2, r.dataset2_hit_rate_pct]] })),
+  });
+  legend($('legend-robust'), R.map(r => ({ key: POL[robKey(r.strategy)].label, color: polColor(robKey(r.strategy)), line: 1 })));
+  $('tbody-robust').innerHTML = R.slice().sort((a, b) => a.dataset1_rank - b.dataset1_rank).map(r => {
+    const held = r.dataset1_rank === r.dataset2_rank, k = robKey(r.strategy);
+    return `<tr${r.dataset1_rank === 1 ? ' class="win"' : ''}>
+      <td><i class="cellchip" style="background:${polColor(k)}"></i>${POL[k].label}</td>
+      <td>${pc(r.dataset1_hit_rate_pct, 2)}</td><td>#${r.dataset1_rank}</td><td>${pc(r.dataset2_hit_rate_pct, 2)}</td><td>#${r.dataset2_rank}</td>
+      <td style="text-align:left;font-family:var(--f-body);color:${held ? css('--good-ink') : css('--critical')}">
+        ${held ? 'Rank held' : (r.dataset2_rank > r.dataset1_rank ? 'Fell ' : 'Rose ') + Math.abs(r.dataset2_rank - r.dataset1_rank)}</td></tr>`;
+  }).join('');
+});
+
+/* fill every [data-b] element now that all bindings exist */
+document.querySelectorAll('[data-b]').forEach(n => {
+  const v = B[n.dataset.b];
+  n.innerHTML = v === undefined ? '<span style="color:var(--critical)">?</span>' : v;
+});
+
+/* ==================================================================== *
+ * 0x00 — THE LIVE ENGINE (top-2, calibrated to results/real_trace_profile.csv)
+ * ==================================================================== */
+const N_EXPERTS = P.num_experts;
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const norm = w => { const s = w.reduce((a, b) => a + b, 0); return w.map(v => v / s); };
+
+/* Each token: a first choice (with forced repeats reproducing the measured
+   consecutive-repeat rate) and a distinct second choice, both drawn from the
+   measured per-expert shares. The "shift" stream rotates layer 15's shares at
+   phase boundaries, as nonstationary_experiment.py does. */
+function makeTrace(kind, n) {
+  const rnd = mulberry32(kind === 'l15' ? 1509 : kind === 'l31' ? 3107 : 77);
+  const prof = D.profile[kind === 'l31' ? 'Layer 31' : 'Layer 15'];
+  const w1 = norm(prof.first), w2 = norm(prof.second);
+  const collision = w1.reduce((s, p) => s + p * p, 0);
+  const pForced = Math.max(0, (prof.repeat_rate - collision) / (1 - collision));
+  const phaseLen = Math.floor(n / 3);
+  const rot = (w, ph) => w.map((_, i) => w[(i - ph * 3 + 8 * N_EXPERTS) % N_EXPERTS]);
+  const pick = (w, skip) => {
+    const ww = norm(w.map((v, i) => i === skip ? 0 : v));
+    let r = rnd(), a = 0;
+    for (let i = 0; i < ww.length; i++) { a += ww[i]; if (r < a) return i; }
+    return ww.length - 1;
+  };
+  const out = []; let prev = null;
+  for (let t = 0; t < n; t++) {
+    const ph = kind === 'shift' ? Math.min(2, Math.floor(t / phaseLen)) : 0;
+    const a = rot(w1, ph), b = rot(w2, ph);
+    const first = (prev !== null && rnd() < pForced) ? prev : pick(a, -1);
+    out.push([first, pick(b, first)]); prev = first;
+  }
+  return out;
+}
+
+const rankOf = tokens => {
+  const c = new Array(N_EXPERTS).fill(0);
+  tokens.forEach(t => t.forEach(e => c[e]++));
+  return c.map((v, i) => [v, i]).sort((x, y) => y[0] - x[0]).map(p => p[1]);
+};
+function makeStatic(k, warm) {
+  const set = new Set(rankOf(warm).slice(0, k));
+  return { access: e => set.has(e), endToken() {}, resident: () => set };
+}
+function makeLRU(k) {
+  let q = [];
+  return {
+    access(e) {
+      const i = q.indexOf(e);
+      if (i >= 0) { q.splice(i, 1); q.push(e); return true; }
+      q.push(e); if (q.length > k) q.shift();
+      return false;
+    },
+    endToken() {}, resident: () => new Set(q),
+  };
+}
+function makePeriodic(k, interval, warm) {
+  let set = new Set(rankOf(warm).slice(0, k)), window = [];
+  return {
+    access: e => set.has(e),
+    endToken(t) { window.push(t); if (window.length >= interval) { set = new Set(rankOf(window).slice(0, k)); window = []; } },
+    resident: () => set,
+  };
+}
+function makeHybrid(k, warm) {
+  const nRes = Math.floor(k / 2), reserved = new Set(rankOf(warm).slice(0, nRes)), cap = k - nRes;
+  let q = [];
+  return {
+    access(e) {
+      if (reserved.has(e)) return true;
+      const i = q.indexOf(e);
+      if (i >= 0) { q.splice(i, 1); q.push(e); return true; }
+      if (cap > 0) { q.push(e); if (q.length > cap) q.shift(); }
+      return false;
+    },
+    endToken() {}, resident: () => new Set([...reserved, ...q]),
+  };
+}
+/* LRU + an order-1 Markov prefetcher at token granularity, gated like
+   prefetch_simulator.py: context = previous token's first choice. */
+function makePrefetch(k) {
+  const lru = makeLRU(k);
+  const counts = {}, totals = {};
+  let ctx = null, inflight = null;
+  return {
+    access(e) {
+      const res = lru.resident();
+      if (res.has(e)) return lru.access(e);
+      lru.access(e);
+      if (e === inflight) { inflight = null; return true; }
+      return false;
+    },
+    endToken(t) {
+      if (ctx !== null) {
+        counts[ctx] = counts[ctx] || new Array(N_EXPERTS).fill(0);
+        t.forEach(e => counts[ctx][e]++);
+        totals[ctx] = (totals[ctx] || 0) + 1;
+      }
+      ctx = t[0];
+      const row = counts[ctx], tot = totals[ctx] || 0;
+      inflight = null;
+      if (row && tot >= 8) {
+        const best = row.indexOf(Math.max(...row));
+        if (row[best] / tot >= 0.3 && !lru.resident().has(best)) inflight = best;
+      }
+    },
+    resident: () => lru.resident(),
+  };
+}
+
+const bestInterval = +everyOf(real('Layer 15', 'top-2', 'Periodic')).replace(/,/g, '');
+const ENG = { trace: 'l15', shown: 'lru', k: P.capacity_k, speed: 12, i: 0, playing: true,
+              tokens: [], sims: {}, tape: [], acc: null, timer: null };
+const POL_KEYS = ['static', 'lru', 'periodic', 'hybrid', 'prefetch'];
+const ENG_LABEL = { static: 'Static (profiled)', lru: 'LRU', periodic: `Periodic (every ${bestInterval})`,
+                    hybrid: 'Hybrid (half pinned)', prefetch: 'LRU + prefetch' };
+
+function engReset() {
+  const full = makeTrace(ENG.trace, 4400);
+  const warm = full.slice(0, 400);          // profiling prefix, never replayed
+  ENG.tokens = full.slice(400);
+  ENG.sims = {
+    static: makeStatic(ENG.k, warm), lru: makeLRU(ENG.k), periodic: makePeriodic(ENG.k, bestInterval, warm),
+    hybrid: makeHybrid(ENG.k, warm), prefetch: makePrefetch(ENG.k),
+  };
+  ENG.acc = Object.fromEntries(POL_KEYS.map(p => [p, { h: 0, n: 0, full: 0, tok: 0 }]));
+  ENG.i = 0; ENG.tape = [];
+  buildBlocks();
+  for (let n = 0; n < 200; n++) engStep(false);
+  engRender();
+}
+
+function engStep(render = true) {
+  if (ENG.i >= ENG.tokens.length) ENG.i = 0;
+  const tok = ENG.tokens[ENG.i++];
+  POL_KEYS.forEach(p => {
+    const sim = ENG.sims[p], a = ENG.acc[p];
+    let allHit = true;
+    tok.forEach(e => {
+      const hit = sim.access(e);
+      a.n++; if (hit) a.h++; else allHit = false;
+      if (p === ENG.shown) { ENG.tape.push(hit ? 'h' : 'm'); if (ENG.tape.length > 64) ENG.tape.shift(); }
+    });
+    a.tok++; if (allHit) a.full++;
+    sim.endToken(tok);
+  });
+  ENG.last = tok;
+  if (render) engRender();
+}
+
+let blocks = [];
+function buildBlocks() {
+  const host = $('eng-blocks');
+  host.innerHTML = ''; blocks = [];
+  const freq = new Array(N_EXPERTS).fill(0);
+  ENG.tokens.forEach(t => t.forEach(e => freq[e]++));
+  const tot = freq.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < N_EXPERTS; i++) {
+    const d = document.createElement('div');
+    d.className = 'blk';
+    d.innerHTML = `E${i}<span class="pct">${(freq[i] / tot * 100).toFixed(0)}%</span>`;
+    host.appendChild(d); blocks.push(d);
+  }
+}
+
+function engRender() {
+  const res = ENG.sims[ENG.shown].resident();
+  const W = $('eng-rails').clientWidth || 640;
+  const colW = Math.min(72, Math.max(36, (W - 16) / N_EXPERTS));
+  let hi = 0, ci = 0;
+  for (let i = 0; i < N_EXPERTS; i++) {
+    const b = blocks[i], inHbm = res.has(i), col = inHbm ? hi++ : ci++;
+    b.style.transform = `translate(${8 + col * colW}px, ${inHbm ? 0 : 84}px)`;
+    b.style.width = (colW - 8) + 'px';
+    b.classList.toggle('in-hbm', inHbm);
+    b.classList.toggle('active', ENG.last && ENG.last.includes(i));
+    b.classList.toggle('fault', ENG.last && ENG.last.includes(i) && !inHbm);
+  }
+  const a = ENG.acc[ENG.shown], hr = a.n ? a.h / a.n * 100 : 0;
+  $('eng-token').textContent = 'token ' + String(a.tok).padStart(6, '0');
+  $('eng-tape').innerHTML = ENG.tape.map(c => `<i class="${c}"></i>`).join('');
+  const lat = (hr / 100) * P.hbm_time_ns + (1 - hr / 100) * P.cxl_time_ns;
+  $('ro-tok').textContent = int(a.tok);
+  $('ro-hit').textContent = pc(hr);
+  $('ro-full').textContent = pc(a.tok ? a.full / a.tok * 100 : 0);
+  $('ro-lat').textContent = fmtT(lat);
+  $('ro-slow').textContent = (lat / P.hbm_time_ns).toFixed(2) + '×';
+  const rate = p => ENG.acc[p].h / Math.max(1, ENG.acc[p].n);
+  const best = Math.max(...POL_KEYS.map(rate));
+  $('eng-scores').innerHTML = POL_KEYS.map(p => {
+    const r = rate(p);
+    return `<div class="score${Math.abs(r - best) < 1e-9 ? ' lead' : ''}">
+      <div class="nm"><i class="chip" style="background:${polColor(p)}"></i>${ENG_LABEL[p]}</div>
+      <div class="track"><div class="bar" style="width:${(r * 100).toFixed(1)}%;background:${polColor(p)}"></div></div>
+      <div class="val">${(r * 100).toFixed(1)}%</div></div>`;
+  }).join('');
+  $('eng-policy-name').textContent = ENG_LABEL[ENG.shown];
+  $('eng-policy-tag').textContent = ENG_LABEL[ENG.shown].toLowerCase();
+}
+function engTimer() {
+  clearInterval(ENG.timer);
+  if (ENG.playing) ENG.timer = setInterval(() => engStep(), 1000 / ENG.speed);
+}
+segmented($('eng-trace'), d => { ENG.trace = d.trace; engReset(); });
+segmented($('eng-rail'), d => { ENG.shown = d.pol; ENG.tape = []; engRender(); });
+$('eng-k').value = ENG.k;
+$('eng-k-rd').textContent = `${ENG.k} of ${N_EXPERTS} experts`;
+$('eng-k').addEventListener('input', e => {
+  ENG.k = +e.target.value; $('eng-k-rd').textContent = `${ENG.k} of ${N_EXPERTS} experts`; engReset();
+});
+$('eng-speed').addEventListener('input', e => {
+  ENG.speed = +e.target.value; $('eng-speed-rd').textContent = `${ENG.speed} tok/s`; engTimer();
+});
+$('eng-play').addEventListener('click', e => {
+  ENG.playing = !ENG.playing;
+  e.target.textContent = ENG.playing ? 'Pause' : 'Play';
+  e.target.classList.toggle('primary', ENG.playing);
+  engTimer();
+});
+$('eng-step').addEventListener('click', () => {
+  ENG.playing = false; $('eng-play').textContent = 'Play'; $('eng-play').classList.remove('primary');
+  engTimer(); engStep();
+});
+$('eng-reset').addEventListener('click', engReset);
+addEventListener('resize', () => { clearTimeout(ENG.rz); ENG.rz = setTimeout(engRender, 140); });
+
+engReset();
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  ENG.playing = false; $('eng-play').textContent = 'Play'; $('eng-play').classList.remove('primary');
+  for (let n = 0; n < 1500; n++) engStep(false);
+  engRender();
+} else {
+  engTimer();
+}
+
+/* ==================================================================== *
+ * Rail nav — mark the section currently in view
+ * ==================================================================== */
+const links = [...document.querySelectorAll('#railnav a')];
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(en => {
+    if (!en.isIntersecting) return;
+    links.forEach(a => a.classList.toggle('is-current', a.getAttribute('href') === '#' + en.target.id));
+  });
+}, { rootMargin: '-15% 0px -70% 0px' });
+document.querySelectorAll('main section').forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

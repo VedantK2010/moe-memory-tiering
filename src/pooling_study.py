@@ -53,11 +53,21 @@ from config import (
 )
 
 REPLICAS = [1, 2, 4, 8, 16, 32]
-# Representative HBM hit rate, from the real Mixtral top-2 measurements.
-HIT_RATE = 0.595
 
 
-def analyse(capacity_k=CAPACITY_K, num_experts=NUM_EXPERTS, hit_rate=HIT_RATE):
+def measured_hit_rate(layer="Layer 15", strategy="LRU"):
+    """Representative HBM hit rate: the real Mixtral top-2 measurement, READ
+    from results/ (real_benchmark.py runs first) rather than retyped."""
+    path = RESULTS_DIR / "real_trace_results.csv"
+    if not path.exists():
+        raise FileNotFoundError("results/real_trace_results.csv is missing -- "
+                                "run real_benchmark.py first.")
+    r = pd.read_csv(path)
+    row = r[(r["layer"] == layer) & (r["routing"] == "top-2") & (r["strategy"] == strategy)]
+    return float(row["hit_rate_pct"].iloc[0]) / 100
+
+
+def analyse(hit_rate, capacity_k=CAPACITY_K, num_experts=NUM_EXPERTS):
     hot_bytes = EXPERT_SIZE_BYTES * capacity_k * NUM_LAYERS
     cold_bytes = EXPERT_SIZE_BYTES * (num_experts - capacity_k) * NUM_LAYERS
 
@@ -90,12 +100,14 @@ def analyse(capacity_k=CAPACITY_K, num_experts=NUM_EXPERTS, hit_rate=HIT_RATE):
                 "access_time_private_us": t_private / 1e3,
                 "access_time_pooled_us": t_pooled / 1e3,
                 "pooled_slowdown_x": t_pooled / t_private,
+                "assumed_hit_rate_pct": hit_rate * 100,
             })
     return pd.DataFrame(rows)
 
 
 def main():
-    df = analyse()
+    hit_rate = measured_hit_rate()
+    df = analyse(hit_rate)
     df.to_csv(RESULTS_DIR / "pooling_study.csv", index=False, encoding=ENCODING)
 
     hot_gb = EXPERT_SIZE_BYTES * CAPACITY_K * NUM_LAYERS / 1e9
@@ -117,7 +129,8 @@ def main():
           f"memory.")
 
     print("\n=== The catch: bandwidth contention ===")
-    print(f"(assuming a {HIT_RATE:.1%} HBM hit rate, our measured top-2 figure)\n")
+    print(f"(assuming a {hit_rate:.1%} HBM hit rate: Layer 15, top-2, LRU, "
+          f"from results/real_trace_results.csv)\n")
     pivot = df.pivot_table(index="replicas", columns="pool_links",
                            values="pooled_slowdown_x")
     pivot.columns = [f"{c} link(s)" for c in pivot.columns]

@@ -1,35 +1,178 @@
 # CXL-Based Memory Tiering for MoE Models
 
-## 📖 Concepts: What does this mean?
-*   **MoE (Mixture-of-Experts):** Large AI models (like Mixtral) are divided into sub-networks called "experts". For every word processed, the AI only activates a few specific experts, leaving the rest idle.
-*   **Memory Tiering (HBM + CXL):** High-Bandwidth Memory (HBM) is incredibly fast but expensive and limited in capacity. Compute Express Link (CXL) allows us to plug in massive amounts of cheaper, slower memory.
-*   **Our Goal:** If we put active experts in fast HBM and idle experts in slower CXL, we save massive amounts of capacity. But since workloads shift, we need a "smart" caching strategy (like LRU or Periodic Re-profiling) to dynamically swap experts in and out of HBM without ruining the AI's speed or consuming too much power.
+Mixture-of-Experts models keep every expert's weights in memory but route each token to only a
+few of them. Mixtral 8x7B holds about 90 GB of expert weights and uses 2 of 8 experts per layer
+per token. This project asks what happens if the cold experts are demoted from HBM to
+CXL-attached memory, and which placement policy keeps the hot ones local.
 
-## 🚀 Key Findings (TL;DR)
-After evaluating over 1.6 million real-world routing decisions from the Mixtral 8x7B model alongside cycle-accurate hardware simulations, we discovered that **a one-size-fits-all caching policy is sub-optimal for MoE models**:
-*   **Finding 1 (Middle Layers are Reactive):** At middle layers (e.g., Layer 15), context shifts rapidly. A highly reactive **Pure LRU** caching strategy dominates here, achieving a **64.9% HBM hit rate** (beating static allocation by over 7%).
-*   **Finding 2 (Deep Layers are Specialized):** At deep layers (e.g., Layer 31), experts become highly specialized for deep semantic logic. Routing becomes heavily skewed toward specific experts, allowing **Periodic Re-profiling** and Static allocation to take the lead with a **~67.2% hit rate**.
-*   **Finding 3 (Significant Energy Savings):** Using cycle-accurate DRAMSim3 hardware physics, we proved that intelligent tiering doesn't just save latency—it reduces total memory power consumption by **~8%** by actively preventing expensive fetches across the CXL PCIe bus.
+We replay recorded Mixtral routing — 829,440 tokens at each of two layers, top-2, so 3.3 million
+expert choices — through an analytic HBM/CXL tier model, and measure both tiers' DRAM energy per
+bit with DRAMSim3.
 
-## 🗺️ How to Read This Project (Step-by-Step)
-If you are evaluating this repository, it can look intimidating. We recommend exploring the files in this logical order:
+---
 
-### Step 1: The Interactive Demo
-*   [**`app.py`**](dashboard/app.py): **Start here.** This is our Streamlit web dashboard. If you run it locally (`streamlit run dashboard/app.py`), it provides a complete user interface visualizing our latency trade-offs, DRAMSim3 hardware validation stats, and real-world caching hit rates.
+## Quick start
 
-### Step 2: The Core Logic (Source Code)
-*   [**`tier_simulator.py`**](src/tier_simulator.py): The foundational math engine. It calculates exactly how much latency is added when an expert is fetched across the CXL bus rather than local HBM.
-*   [**`periodic_reprofile.py`**](src/periodic_reprofile.py): Our primary experiment. This script tests different algorithms (Pure Static, Pure LRU, and Periodic Re-profiling) to see which one manages the HBM/CXL boundary best.
-*   [**calc_energy.py**](src/calc_energy.py): The hardware physics. It converts raw memory access counts into actual nanoJoules (nJ) of energy consumed, based on our cycle-accurate DRAMSim3 simulations.
-*   [**prefetch_simulator.py**](src/prefetch_simulator.py): Advanced machine learning. Implements a Markov Chain to predict future expert requests and prefetch them from CXL, hiding the latency penalty.
+```bash
+pip install -r requirements.txt
+python src/convert_real_data.py   # once: downloads the real Mixtral traces into data/
+python run_all.py                 # regenerates every CSV, figure and the dashboard (~2.5 min)
+```
 
-### Step 3: The Deliverables (Results)
-*   [**`four_strategy_comparison.png`**](results/four_strategy_comparison.png): A visual graph showing how our different caching strategies react to sudden context shifts in the workload.
-*   [**`energy_metrics.csv`**](results/energy_metrics.csv): The raw data proving that a highly reactive tiering strategy (like LRU) reduces total system memory power by ~8% by minimizing CXL usage.
-*   [**`tiering_sweep_results.csv`**](results/tiering_sweep_results.csv): A spreadsheet showing the strict linear penalty of offloading experts to CXL.
+Then open **[`dashboard/index.html`](dashboard/index.html)** in any browser. It is a single page
+with a live policy replay, a hardware configurator, and every result below.
 
-### Step 4: Advanced Tools & Data (For Deep Dives)
-*   [**`generate_trace.py`**](src/generate_trace.py): Generates synthetic workloads to test our caching theories before running them on real data.
-*   [**`hybrid_strategy.py`**](src/hybrid_strategy.py): An advanced experiment testing a "half-static, half-dynamic" memory budget allocation.
-*   [**`robustness_check.py`**](src/robustness_check.py): A cross-validation script ensuring our results hold up under different randomized mathematical seeds.
-*   **`/data/real_expert_trace.csv`**: The massive 800,000+ token real-world routing datasets extracted from HuggingFace. *(Note: These raw CSV traces are excluded from GitHub via `.gitignore` to prevent repository bloat, but they power the final metrics found in the results folder).*
+`python run_all.py --list` shows the stages; `--skip-real` skips the ones that need the real
+traces.
+
+---
+
+## Concepts
+
+- **MoE (Mixture-of-Experts).** Each feed-forward layer is split into experts; a router picks
+  the top-k per token. Mixtral: 8 experts per layer, top-2, 352 MB per expert.
+- **Memory tiering.** HBM is fast but small and expensive. CXL attaches a larger pool of cheaper,
+  slower memory over a PCIe-class link.
+- **The question.** Keep the active experts in HBM and demote the rest to CXL, and you free real
+  capacity — but the active set moves. How well a policy tracks it decides the cost.
+
+---
+
+## Key findings
+
+Numbers are from `results/` as of 14 Sept 2026; the dashboard always shows the current values.
+
+1. **This is a bandwidth problem, not a latency one.** A CXL expert fetch takes 12.5× an HBM
+   fetch — exactly the bandwidth ratio. At 352 MB per expert, latency is 0.003% of a CXL fetch,
+   so CXL's +70 ns adder is invisible. (`model_parameters.csv`)
+2. **Per-access hit rate overstates what a token sees.** Under top-2, a token avoids CXL only if
+   *both* experts are resident. At layer 15 LRU hits 59.5% of accesses but serves only 37.1% of
+   tokens entirely from HBM. At layer 31, static placement keeps *more* tokens fully resident
+   than LRU (43.6% vs 39.8%) despite a lower per-access hit rate. (`real_token_residency.csv`)
+3. **The "depth changes the winner" story was a top-1 artifact.** Reading only the first-choice
+   expert, LRU wins at layer 15 (64.9%) and periodic re-profiling at layer 31 (67.4%). On the
+   real top-2 workload, every deployable policy at both layers lands within 55.0–59.5%.
+   (`real_trace_results.csv`)
+4. **Migration cost erases LRU's edge at layer 31.** LRU is 0.6% faster than static at layer 31
+   when installing an expert is free, and loses that lead once an install costs 10% of a full
+   HBM write. At layer 15 it is still 1.9% ahead at a full write. (`migration_sensitivity.csv`)
+5. **Periodic re-profiling's best cadence undercuts its purpose.** On the real traces the best
+   interval is the shortest tested, 100 tokens. At 2,000+ tokens (layer 15) or 1,000+ tokens
+   (layer 31) it scores below static placement. (`real_periodic_sweep.csv`)
+6. **Energy follows the hit rate.** With both tiers' DRAM measured (HBM 1.632 pJ/bit; CXL DRAM
+   9.080 pJ/bit using DDR4-3200 as a DDR5 proxy, plus a cited 5.0 pJ/bit link), LRU saves 7.8% of
+   memory energy at layer 15 and 0.6% at layer 31; periodic re-profiling (every 100 tokens) saves
+   6.0% and 4.5%. Energy is a linear function of hit rate, so this is a cost translation, not
+   independent evidence. (`energy_metrics.csv`)
+7. **Tiering is a small-batch technique.** At batch 1 a decode step needs 2 experts; from batch 4
+   most steps need more than a 4-expert budget holds, and by batch 32 every expert is touched every
+   step. Steps that never touch CXL fall from 32.5% to 0. (`batch_sensitivity.csv`)
+8. **More, smaller experts make tiering harder, not easier.** With top-2 fixed, the share of
+   tokens fully in HBM stays at 35–44% from 8 to 128 experts; with top-4 at 128 experts it falls
+   to 18.6%. top-k dominates, not N. (`scalability_sweep.csv`)
+9. **Pooling trades capacity for bandwidth.** Sharing one CXL copy of the cold experts across 32
+   replicas saves 1,398 GB (1.94× consolidation), but on one link each replica's fetches are 28.7×
+   slower. Links must scale with replicas. (`pooling_study.csv`)
+10. **Prefetching is a negative result.** Across 70 configurations on 7 datasets, mean prediction
+    accuracy is 29.1%. On the real traces the best setting hides 3.1–4.9 more points of accesses
+    for 14–15% more CXL traffic and energy. Prefetching can only hide latency; it never saves
+    bandwidth or energy. (`prefetch_multi_dataset.csv`)
+11. **The policy ranking is robust.** On an independent synthetic dataset with sharper skew, all
+    four policies keep their rank; periodic re-profiling is first on both (best intervals 2,000
+    and 500 tokens). (`robustness_check.csv`)
+
+---
+
+## Repository tour
+
+```
+run_all.py                      regenerates everything, dashboard last
+dashboard/index.html            the interactive dashboard (numbers injected from results/)
+src/config.py                   every path and constant; reads measured pJ/bit from results/
+src/tier_simulator.py           the engine: static, LRU, periodic, hybrid, migration cost
+src/generate_trace.py           synthetic routing traces + DRAMSim3 address traces
+src/convert_real_data.py        downloads the real Mixtral traces into data/
+src/capacity_sweep.py           capacity vs time; ranked vs random vs LRU
+src/nonstationary_experiment.py four policies under workload shift; hybrid split sweep
+src/robustness_check.py         the same comparison on a second, independent dataset
+src/real_benchmark.py           real traces: top-1 vs top-2, token-level residency, interval sweep
+src/calc_energy.py              energy per token from measured pJ/bit
+src/batch_sensitivity.py        where tiering stops paying
+src/migration_sensitivity.py    does LRU survive migration cost?
+src/scalability_sweep.py        expert count and top-k
+src/pooling_study.py            CXL expansion and pooling
+src/prefetch_simulator.py       Markov prefetching across a dataset suite
+src/parse_dramsim3.py           DRAMSim3 stats -> results/
+src/build_dashboard.py          results/ -> dashboard/index.html, model_parameters.csv
+results/                        every CSV and figure — the single source for all numbers
+dramsim3/                       DRAMSim3 stats and the exact command for each run
+data/                           traces (gitignored; regenerable)
+```
+
+**No number is typed by hand anywhere downstream of `results/`.** `config.py` reads the measured
+energy from the DRAMSim3 summaries, and `build_dashboard.py` injects every dashboard figure —
+including the numbers in its prose — from the result files.
+
+---
+
+## DRAMSim3
+
+DRAMSim3 runs outside the pipeline (WSL2), on the trace `generate_trace.py` writes
+(`data/dramsim3_loaded.txt`: 256,000 back-to-back 64 B reads, each expert fetch continuing through
+that expert's address range). Two runs, each ending when its trace does:
+
+| Run | Config | Result |
+|---|---|---|
+| HBM tier | `HBM2_8Gb_x128.ini`, `-c 271000` | 8/8 channels, 23.6% utilised (DRAMSim3's trace reader caps HBM2 at 25%), 1.632 pJ/bit |
+| CXL-side DRAM | `DDR4_8Gb_x8_3200.ini`, `-c 1250000` | 81.3% utilised, 9.080 pJ/bit |
+
+Energy is read + activate energy per DRAM command. Stats and commands are in `dramsim3/`;
+`parse_dramsim3.py` turns them into `results/dramsim3_*_summary.csv`, which `config.py` reads.
+
+---
+
+## Data
+
+| File | How to get it |
+|---|---|
+| `data/expert_trace.csv`, `nonstationary_trace.csv`, `dataset2_trace.csv`, `dramsim3_*.txt` | generated by `python run_all.py` |
+| `data/real_expert_trace.csv` (layer 15), `data/real_expert_trace_layer31.csv` | `python src/convert_real_data.py` (downloads ~24 MB once) |
+
+---
+
+## Limitations
+
+- **Analytic, not cycle-accurate.** Latency comes from a two-tier model (`t = L + S/B`);
+  DRAMSim3 supplies DRAM energy per bit only.
+- **Two-valued model.** Every access costs one HBM or one CXL fetch, so time and energy are
+  linear functions of hit rate and every latency chart is a hit-rate chart rescaled.
+- **Per-access re-fetch.** Each access is charged a full expert transfer, so absolute times are
+  expert-fetch times, not decode latencies. Comparisons between policies survive.
+- **HBM latency** (60.78 ns) is an idle-load DRAM device latency, not load-to-use.
+- **Energy.** CXL DRAM is measured with DDR4-3200 standing in for DDR5 (DRAMSim3 has no DDR5
+  config); the 5.0 pJ/bit link figure is cited, not simulated. The DRAMSim3 trace is a scaled
+  sample (8 × 64 B reads per expert fetch).
+- **Batch-1 decode** everywhere except the batch-size study.
+- **Real traces** cover two layers of one model family; expert popularity is domain-dependent.
+- **Synthetic traces** are used where a controlled change is needed (shift, robustness,
+  scalability, capacity sweep).
+- **Prefetching** reports an upper bound on hidden latency.
+
+---
+
+## References
+
+- Jiang et al., *Mixtral of Experts*, arXiv:2401.04088, 2024.
+- Fedus, Zoph & Shazeer, *Switch Transformers*, JMLR 23(120), 2022.
+- Li, Yang, Reddy, Srivastava & Jacob, *DRAMsim3: A Cycle-Accurate, Thermal-Capable DRAM
+  Simulator*, IEEE Computer Architecture Letters 19(2), 2020 — used here for DRAM energy per bit.
+- CXL Consortium, *Compute Express Link Specification, Revision 2.0*, 2020.
+- Sun et al., *Demystifying CXL Memory with Genuine CXL-Ready Systems and Devices*, MICRO-56,
+  2023 — measured CXL latency overheads.
+- Mattson, Gecsei, Slutz & Traiger, *Evaluation Techniques for Storage Hierarchies*, IBM Systems
+  Journal 9(2), 1970.
+- Allen Institute for AI, `allenai/analysis_mixtral` (Hugging Face) — the recorded routing traces.
+
+---
+
+Vedant Kabra · Neil Verma

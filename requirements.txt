@@ -1,0 +1,8 @@
+# Analysis pipeline (src/, run_all.py). The dashboard (dashboard/index.html)
+# needs none of this -- it is a single page that opens in any browser.
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+
+# Only for re-downloading the real Mixtral traces (src/convert_real_data.py)
+pyarrow>=14

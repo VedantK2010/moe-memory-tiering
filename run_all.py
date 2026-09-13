@@ -30,7 +30,8 @@ STAGES = [
     ("migration_sensitivity",    "Does LRU still win once migration costs something?"),
     ("scalability_sweep",        "Tiering headroom vs expert count and top_k"),
     ("pooling_study",            "CXL memory expansion and pooling"),
-    ("prefetch_simulator",       "Markov prefetching (exploratory upper bound)"),
+    ("prefetch_simulator",       "Markov prefetching across a dataset suite (negative result)"),
+    ("build_dashboard",          "Write results/ into dashboard/index.html"),
 ]
 
 REAL_STAGES = {"real_benchmark", "calc_energy", "batch_sensitivity",
@@ -79,10 +80,9 @@ def main():
     else:
         print(f"  All {len(stages)} stages completed in {total:.1f}s")
     print("=" * 72)
-    print("\nDRAMSim3 statistics are parsed separately (they come from a run on")
-    print("your own machine, not from this pipeline):")
-    print("  python src/parse_dramsim3.py dramsim3/<stats>.json \\")
-    print("         --epoch dramsim3/<epochs>.json --label hbm2_loaded")
+    print("\nDRAMSim3 runs happen outside this pipeline (WSL, see README.md); their")
+    print("stats are parsed into results/ with src/parse_dramsim3.py. Open")
+    print("dashboard/index.html to see every result.")
     return 1 if failed else 0
 
 

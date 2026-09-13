@@ -1,5 +1,0 @@
-strategy,dataset1_overall_ns,dataset2_overall_ns,dataset1_rank,dataset2_rank
-Pure Static,129513.9,124027.96873437501,4,3
-Pure LRU,129304.2,119661.69954687501,3,2
-Hybrid,126278.5,132314.89301562498,2,4
-Periodic Re-profile,123395.1,97776.05609375,1,1

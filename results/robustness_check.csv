@@ -1,5 +1,5 @@
-strategy,dataset1_hit_rate_pct,dataset2_hit_rate_pct,dataset1_rank,dataset2_rank
-Static,51.11583333333334,53.5525,3,3
-Lru,51.21,55.49916666666667,2,2
-Hybrid,50.92333333333333,49.86666666666667,4,4
-Periodic,53.8675,66.23333333333333,1,1
+strategy,dataset1_hit_rate_pct,dataset2_hit_rate_pct,dataset1_rank,dataset2_rank,dataset1_periodic_interval,dataset2_periodic_interval
+Static,51.11583333333334,53.5525,3,3,2000,500
+Lru,51.21,55.49916666666667,2,2,2000,500
+Hybrid,50.92333333333333,49.86666666666667,4,4,2000,500
+Periodic,53.8675,66.23333333333333,1,1,2000,500

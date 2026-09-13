@@ -1,3 +1,0 @@
-layer,accesses,lru_only_hit_rate_pct,prefetch_hits,effective_hit_rate_pct,prediction_accuracy_pct,avg_time_ns,status
-Layer 15,829440,64.94068287037037,30052,68.56385030864197,18.48205115589695,1893027.5472100212,"UPPER BOUND - no bandwidth contention, no pollution, no migration cost"
-Layer 31,829440,65.90952932098766,34680,70.09066358024691,26.115047779693818,1821009.351623746,"UPPER BOUND - no bandwidth contention, no pollution, no migration cost"

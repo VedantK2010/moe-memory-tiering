@@ -1,0 +1,23 @@
+name,value,unit,basis
+num_experts,8.0,experts/layer,Mixtral 8x7B architecture
+top_k,2.0,experts/token,Mixtral 8x7B architecture
+num_layers,32.0,layers,Mixtral 8x7B architecture
+capacity_k,4.0,experts in HBM,headline HBM budget (assumed)
+num_random_trials,20.0,placements,random baseline draws per budget
+expert_bytes,352321536.0,B,derived: 3 x 4096 x 14336 x 2 B
+expert_gb_all_layers,90.194313216,GB,derived
+hbm_latency_ns,60.78,ns,measured: earlier idle DRAMSim3 HBM2 run
+hbm_bandwidth_gbps,800.0,GB/s,assumed: HBM3-class stack
+cxl_device_latency_ns,90.0,ns,assumed: DDR5-class device
+cxl_added_latency_ns,70.0,ns,cited: CXL controller + PHY adder
+cxl_latency_ns,160.0,ns,derived: device + adder
+cxl_bandwidth_gbps,64.0,GB/s,assumed: one CXL 2.0 x8 Gen5 link
+hbm_time_ns,410217.03,ns/expert fetch,derived: latency + size/bandwidth
+cxl_time_ns,5127113.125,ns/expert fetch,derived: latency + size/bandwidth
+hbm_pj_per_bit,1.6321004333496094,pJ/bit,measured: DRAMSim3 HBM2
+cxl_dram_pj_per_bit,9.08016357421875,pJ/bit,measured: DRAMSim3 DDR4-3200 as DDR5 proxy
+cxl_link_pj_per_bit,5.0,pJ/bit,cited: PCIe Gen5 SerDes + PHY
+cxl_pj_per_bit,14.08016357421875,pJ/bit,derived: DRAM + link
+hbm_fetch_mj,4.600193052672,mJ/expert fetch,derived
+cxl_fetch_mj,39.68595886079999,mJ/expert fetch,derived
+real_warmup_tokens,20000.0,tokens,"profiling prefix, never scored"

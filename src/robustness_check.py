@@ -60,6 +60,9 @@ def main():
     # Rank 1 = best (highest hit rate)
     df["dataset1_rank"] = df["dataset1_hit_rate_pct"].rank(ascending=False).astype(int)
     df["dataset2_rank"] = df["dataset2_hit_rate_pct"].rank(ascending=False).astype(int)
+    # Periodic numbers are only reproducible with their interval attached.
+    df["dataset1_periodic_interval"] = iv1
+    df["dataset2_periodic_interval"] = iv2
     df.to_csv(RESULTS_DIR / "robustness_check.csv", index=False, encoding=ENCODING)
 
     print(f"Dataset 1: alpha={SYNTH_SKEW_ALPHA} (milder skew), best periodic interval {iv1:,}")
