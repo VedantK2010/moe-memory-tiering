@@ -60,40 +60,83 @@ EXPERT_BYTES_ALL_LAYERS = EXPERT_BYTES_PER_LAYER * NUM_LAYERS   # ~90.2 GB
 
 
 # ----------------------------------------------------------------------
+# DRAMSim3 results -- read from results/, never retyped
+# ----------------------------------------------------------------------
+# src/parse_dramsim3.py writes one whole-system summary row per DRAMSim3 run
+# (results/dramsim3_<label>_summary.csv); the raw stats and the exact command
+# for each run are in dramsim3/. Four runs feed this model:
+#   hbm2_loaded / ddr4_cxl : streaming trace, back-to-back -> energy per bit
+#   hbm2_idle   / ddr4_idle: same addresses, 1 read per 100 cycles -> latency
+DRAMSIM_SUMMARIES = {
+    "hbm": "hbm2_loaded", "cxl_dram": "ddr4_cxl",
+    "hbm_idle": "hbm2_idle", "cxl_dram_idle": "ddr4_idle",
+}
+
+
+def _dramsim_field(label, field):
+    """One value from the whole-system row parse_dramsim3.py wrote for run
+    `label`. A missing file gives NaN rather than failing at import, because
+    parse_dramsim3.py itself imports this module to create those files;
+    run_all.py, calc_energy.py and build_dashboard.py refuse to run on it
+    (see require_dramsim_results)."""
+    path = RESULTS_DIR / f"dramsim3_{label}_summary.csv"
+    if not path.exists():
+        return float("nan")
+    with open(path, encoding=ENCODING, newline="") as f:
+        return float(next(csv.DictReader(f))[field])
+
+
+def require_dramsim_results():
+    """Fail loudly if any DRAMSim3 summary the model reads is missing."""
+    missing = [f"results/dramsim3_{label}_summary.csv"
+               for label in DRAMSIM_SUMMARIES.values()
+               if not (RESULTS_DIR / f"dramsim3_{label}_summary.csv").exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Missing {', '.join(missing)}. Run DRAMSim3 and "
+            f"src/parse_dramsim3.py first (see README.md).")
+
+
+# ----------------------------------------------------------------------
 # Memory tier parameters
 # ----------------------------------------------------------------------
-# HBM device latency is MEASURED from our own DRAMSim3 HBM2 run:
-#   average_read_latency = 60.78 cycles at tCK = 1.0 ns  ->  60.78 ns
-# (tCK confirmed from the run itself: 32,000 reads x 64 B over 10,000,000
-#  cycles at the reported 0.2048 GB/s implies exactly 1 ns per cycle.)
+# Device latencies are MEASURED with DRAMSim3 on the idle trace: the average
+# read latency (controller + DRAM, no queueing to speak of) of HBM2 and of
+# DDR4-3200, which stands in for the DDR5 behind a CXL expander. They are
+# DRAM-side latencies, not end-to-end load-to-use; the CXL link and
+# controller traversal is added separately as a cited adder.
 #
-# NOTE: this is an idle-load DRAM device latency, not an end-to-end
-# load-to-use latency (which also includes controller queueing and the
-# on-package path, and is typically 2-3x higher). We report it as what it
-# is. See LIMITATIONS in the README.
-HBM_LATENCY_NS = 60.78
-HBM_BANDWIDTH_GBPS = 800  # HBM3-class, per stack
+# At expert granularity none of this matters much: latency is < 0.02% of any
+# 352 MB fetch (see access_time_ns). It is measured so that no number in the
+# model is typed in or borrowed from an untraceable run.
+HBM_LATENCY_NS = _dramsim_field(DRAMSIM_SUMMARIES["hbm_idle"], "avg_read_latency_ns")
+HBM_BANDWIDTH_GBPS = 800  # ASSUMED: HBM3-class, per stack
 
-# CXL adds a controller + PCIe PHY traversal on top of DRAM-class latency.
+# CXL adds a controller + PCIe PHY traversal on top of the DRAM latency.
 # ~70 ns is the commonly reported round-trip adder (arXiv:2305.05033 and
 # CXL memory-expansion vendor reports).
-CXL_ADDED_LATENCY_NS = 70
-CXL_DEVICE_LATENCY_NS = 90.0  # DDR5-class device latency behind the CXL link
+CXL_ADDED_LATENCY_NS = 70  # CITED
+CXL_DEVICE_LATENCY_NS = _dramsim_field(DRAMSIM_SUMMARIES["cxl_dram_idle"], "avg_read_latency_ns")
 CXL_LATENCY_NS = CXL_DEVICE_LATENCY_NS + CXL_ADDED_LATENCY_NS
-CXL_BANDWIDTH_GBPS = 64  # one CXL 2.0 x8 link at Gen5 rates
+# ASSUMED: one CXL link at PCIe Gen5 rates, x16 (64 GB/s per direction; an x8
+# link would be 32 GB/s). x16 is the width of current CXL memory controllers.
+CXL_BANDWIDTH_GBPS = 64
 
 
 def access_time_ns(latency_ns, bandwidth_gbps, size_bytes):
     """Time for one memory access = latency (time to first byte) + transfer.
 
+    Bandwidths are decimal GB/s (1e9 B/s), so sizes are converted with 1e9
+    too. (An earlier version divided by 1024**3, understating every transfer
+    time by 7.4%; ratios between tiers were unaffected.)
+
     IMPORTANT CAVEAT, state this in the report: at expert granularity the
     transfer term dominates completely. For a 352 MB expert the fixed
-    latency is ~0.01% of total access time, so this study is effectively a
-    BANDWIDTH study -- CXL's famous +70 ns adder is invisible at this
-    granularity. That is a finding, not an oversight.
+    latency is < 0.02% of total access time, so this study is effectively a
+    BANDWIDTH study -- CXL's +70 ns adder is invisible at this granularity.
+    That is a finding, not an oversight.
     """
-    size_gb = size_bytes / (1024 ** 3)
-    return latency_ns + (size_gb / bandwidth_gbps) * 1e9
+    return latency_ns + size_bytes / bandwidth_gbps
 
 
 # Pre-computed per-access times for a full expert fetch.
@@ -127,34 +170,6 @@ MIGRATION_COST_FACTOR = 0.0
 #     as done; dividing energy by reads-done halved every pJ/bit when the
 #     trace repeated addresses.
 DRAMSIM_ACCESS_BYTES = 64
-
-
-DRAMSIM_SUMMARIES = {"hbm": "hbm2_loaded", "cxl_dram": "ddr4_cxl"}
-
-
-def _dramsim_field(label, field):
-    """One value from the whole-system row parse_dramsim3.py wrote for run
-    `label`. A missing file gives NaN rather than failing at import, because
-    parse_dramsim3.py itself imports this module to create those files;
-    calc_energy.py refuses to run on NaN (see require_dramsim_energy)."""
-    path = RESULTS_DIR / f"dramsim3_{label}_summary.csv"
-    if not path.exists():
-        return float("nan")
-    with open(path, encoding=ENCODING, newline="") as f:
-        return float(next(csv.DictReader(f))[field])
-
-
-def require_dramsim_energy():
-    """Fail loudly if the DRAMSim3 summaries the energy figures come from
-    are missing."""
-    missing = [f"results/dramsim3_{label}_summary.csv"
-               for label in DRAMSIM_SUMMARIES.values()
-               if not (RESULTS_DIR / f"dramsim3_{label}_summary.csv").exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"Missing {', '.join(missing)}. Run DRAMSim3 and "
-            f"src/parse_dramsim3.py first (see README.md).")
-
 
 HBM_DYNAMIC_PJ_PER_ACCESS = _dramsim_field(DRAMSIM_SUMMARIES["hbm"], "dynamic_pj_per_access")
 HBM_PJ_PER_BIT = _dramsim_field(DRAMSIM_SUMMARIES["hbm"], "dynamic_pj_per_bit")
@@ -230,9 +245,11 @@ def summary():
         f"All layers           : {NUM_LAYERS}  ->  {EXPERT_BYTES_ALL_LAYERS / 1e9:.1f} GB of expert weights",
         "",
         f"HBM access (1 expert): {HBM_TIME_NS:,.1f} ns "
-        f"(latency {HBM_LATENCY_NS} ns = {HBM_LATENCY_NS / HBM_TIME_NS * 100:.3f}% of total)",
+        f"(latency {HBM_LATENCY_NS:.2f} ns [MEASURED, DRAMSim3 idle] = "
+        f"{HBM_LATENCY_NS / HBM_TIME_NS * 100:.4f}% of total)",
         f"CXL access (1 expert): {CXL_TIME_NS:,.1f} ns "
-        f"(latency {CXL_LATENCY_NS} ns = {CXL_LATENCY_NS / CXL_TIME_NS * 100:.3f}% of total)",
+        f"(latency {CXL_DEVICE_LATENCY_NS:.2f} ns DRAM [MEASURED, DDR4 idle] + "
+        f"{CXL_ADDED_LATENCY_NS} ns link [CITED] = {CXL_LATENCY_NS / CXL_TIME_NS * 100:.4f}% of total)",
         f"CXL/HBM time ratio   : {CXL_TIME_NS / HBM_TIME_NS:.2f}x "
         f"(bandwidth ratio is {HBM_BANDWIDTH_GBPS / CXL_BANDWIDTH_GBPS:.2f}x -- "
         f"the model is bandwidth-dominated)",

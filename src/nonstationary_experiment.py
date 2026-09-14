@@ -140,7 +140,9 @@ def run_phase_comparison(trace_df, capacity_k, num_experts, best_interval):
 
 
 def hybrid_split_sweep(trace_df, capacity_k, num_experts):
-    ranked = ts.rank_experts(trace_df, num_experts)
+    # Pin the experts that were hot in phase 0, as the phase comparison does.
+    # Ranking on the whole trace would let the pinned set see the future.
+    _, ranked = static_from_first_phase(trace_df, num_experts, capacity_k)
     rows = []
     for reserved in range(capacity_k + 1):
         r = ts.simulate_hybrid(trace_df, capacity_k, reserved, ranked)

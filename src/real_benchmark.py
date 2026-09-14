@@ -90,7 +90,7 @@ def analyse_layer(name, path, capacity_k=CAPACITY_K):
 
         for strategy, res, extra in [
             ("Static (oracle)", oracle, ""),
-            ("Static (profiled on first 20k)", warm, ""),
+            (f"Static (profiled on first {WARMUP_TOKENS // 1000}k)", warm, ""),
             ("LRU", lru, ""),
             (f"Periodic (every {best_iv:,})", per_interval[best_iv], f"interval={best_iv}"),
         ]:
@@ -164,7 +164,7 @@ def main():
         RESULTS_DIR / "real_trace_profile.csv", index=False, encoding=ENCODING)
 
     for m in metas:
-        print(f"\n=== {m['layer']} ({m['tokens']:,} tokens, "
+        print(f"\n=== {m['layer']} ({m['tokens']:,} tokens, {m['eval_tokens']:,} scored; "
               f"consecutive-repeat rate {m['repeat_rate']:.4f}) ===")
         sub = results[results["layer"] == m["layer"]]
         for routing in ("top-1", "top-2"):

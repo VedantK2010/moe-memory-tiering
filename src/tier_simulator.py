@@ -20,7 +20,7 @@ loop. Say so plainly in the report.
 TWO PROPERTIES YOU MUST DISCLOSE
 --------------------------------
 1. BANDWIDTH-DOMINATED. At 352 MB per expert the fixed latency term is
-   ~0.01% of access time. The CXL/HBM ratio (12.5x) is exactly the inverse
+   < 0.01% of an HBM fetch and < 0.002% of a CXL fetch. The CXL/HBM ratio (12.5x) is exactly the inverse
    bandwidth ratio. CXL's +70 ns adder does not show up at this granularity.
 
 2. TWO-VALUED. Every access costs either HBM_TIME_NS or CXL_TIME_NS, so
@@ -199,7 +199,8 @@ def simulate_lru(trace_df, capacity_k, top_k=None, migration_factor=None,
 
     seq = access_sequence(trace_df, top_k=top_k)
     if capacity_k >= num_experts:
-        # Everything fits; only the very first touch of each expert misses.
+        # Everything fits: treated as preloaded, like static placement at the
+        # same budget, so every access is a hit.
         return _result(len(seq), 0, len(seq) * HBM_TIME_NS)
     if capacity_k <= 0:
         # No HBM budget at all: every access goes to CXL, nothing to install.
@@ -337,6 +338,9 @@ def token_level_stats(trace_df, capacity_k, strategy="lru", tier_map=None,
         hit_grid = in_hbm[tokens]
     elif strategy == "lru":
         hit_grid = np.zeros(tokens.shape, dtype=bool)
+        if capacity_k <= 0:
+            # No HBM budget: nothing is ever resident (and nothing to evict).
+            tokens = tokens[:0]
         cache = {}
         clock = 0
         for i, row in enumerate(tokens):

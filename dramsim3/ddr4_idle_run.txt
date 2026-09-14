@@ -1,0 +1,5 @@
+config: configs/DDR4_8Gb_x8_3200.ini
+cycles: 25600000
+trace: data/dramsim3_unloaded.txt (256,000 READs, 1 per 100 cycles: idle, measures device latency)
+command: ./dramsim3main ../configs/DDR4_8Gb_x8_3200.ini -c 25600000 -t dramsim3_unloaded.txt -o <out>
+DRAMsim3 commit: 2981759

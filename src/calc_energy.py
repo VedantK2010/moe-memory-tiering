@@ -51,7 +51,7 @@ from config import (
     HBM_PJ_PER_BIT, CXL_PJ_PER_BIT, CXL_DRAM_PJ_PER_BIT, CXL_LINK_PJ_PER_BIT,
     CXL_ENERGY_IS_MEASURED, CXL_ENERGY_BASIS,
     HBM_EXPERT_FETCH_PJ, CXL_EXPERT_FETCH_PJ,
-    require_dramsim_energy,
+    require_dramsim_results,
 )
 
 PJ_PER_MJ = 1e9
@@ -64,7 +64,7 @@ def energy_per_token_pj(hit_rate):
 
 
 def main():
-    require_dramsim_energy()
+    require_dramsim_results()
     src = RESULTS_DIR / "real_trace_results.csv"
     if not src.exists():
         print("real_trace_results.csv not found -- run real_benchmark.py first.")

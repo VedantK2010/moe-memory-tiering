@@ -60,10 +60,18 @@ def run_layer(name, path, capacity_k=CAPACITY_K):
     static = ts.simulate_static(df, ts.assign_tiers(ranked, capacity_k))
     static_time = static["avg_time_per_access_ns"]
 
+    # LRU's time is linear in the migration factor (every miss pays
+    # factor x a full write), so the break-even factor is exact rather than
+    # read off the sweep grid:  static = lru_0 + f* x write x miss_rate.
+    lru0 = ts.simulate_lru(df, capacity_k, migration_factor=0.0)
+    miss_rate = lru0["misses"] / lru0["accesses"]
+    breakeven = (static_time - lru0["avg_time_per_access_ns"]) / (MIGRATION_WRITE_NS * miss_rate)
+
     rows = []
     for f in FACTORS:
         lru = ts.simulate_lru(df, capacity_k, migration_factor=f)
         rows.append({
+            "breakeven_factor": breakeven,
             "layer": name,
             "migration_factor": f,
             "migration_cost_us": MIGRATION_WRITE_NS * f / 1e3,
@@ -76,14 +84,6 @@ def run_layer(name, path, capacity_k=CAPACITY_K):
             "migrations": lru["migrations"],
         })
     return pd.DataFrame(rows)
-
-
-def crossover(df):
-    """Smallest migration factor at which LRU stops beating static."""
-    losing = df[df["lru_advantage_pct"] <= 0]
-    if losing.empty:
-        return None
-    return float(losing.iloc[0]["migration_factor"])
 
 
 def main():
@@ -109,15 +109,16 @@ def main():
         print(sub[["migration_factor", "migration_cost_us", "lru_hit_rate_pct",
                    "lru_advantage_pct"]].to_string(index=False,
                                                     float_format=lambda v: f"{v:10.2f}"))
-        x = crossover(sub)
+        x = float(sub.iloc[0]["breakeven_factor"])
         base = sub.iloc[0]["lru_advantage_pct"]
-        if x is None:
+        if x > 1:
             print(f"  LRU beats static across the whole sweep "
-                  f"(advantage {base:.2f}% -> {sub.iloc[-1]['lru_advantage_pct']:.2f}%).\n")
+                  f"(advantage {base:.2f}% -> {sub.iloc[-1]['lru_advantage_pct']:.2f}%); "
+                  f"break-even would need {x:.0%} of a full write.\n")
         else:
             print(f"  LRU's {base:.2f}% advantage vanishes once migration costs "
-                  f"{x:.0%} of a full HBM write\n  "
-                  f"({MIGRATION_WRITE_NS*x/1e3:,.0f} us per miss). Beyond that, "
+                  f"{x:.1%} of a full HBM write\n  "
+                  f"({MIGRATION_WRITE_NS*x/1e3:,.1f} us per miss). Beyond that, "
                   f"static is the better policy.\n")
 
     fig, axes = plt.subplots(1, len(df["layer"].unique()), figsize=(11, 4.3), squeeze=False)

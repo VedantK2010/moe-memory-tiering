@@ -64,6 +64,12 @@ def main():
             print(f"  {name:<26} {desc}")
         return 0
 
+    # The model reads latency and energy from the DRAMSim3 summaries in
+    # results/; without them every stage would compute NaN silently.
+    sys.path.insert(0, str(SRC))
+    import config
+    config.require_dramsim_results()
+
     stages = [s for s in STAGES if not (args.skip_real and s[0] in REAL_STAGES)]
 
     total = 0.0

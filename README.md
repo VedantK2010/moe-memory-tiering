@@ -43,8 +43,9 @@ traces.
 Numbers are from `results/` as of 14 Sept 2026; the dashboard always shows the current values.
 
 1. **This is a bandwidth problem, not a latency one.** A CXL expert fetch takes 12.5× an HBM
-   fetch — exactly the bandwidth ratio. At 352 MB per expert, latency is 0.003% of a CXL fetch,
-   so CXL's +70 ns adder is invisible. (`model_parameters.csv`)
+   fetch — exactly the bandwidth ratio. At 352 MB per expert, latency is under 0.002% of a CXL
+   fetch (440 µs per HBM fetch, 5.51 ms per CXL fetch), so CXL's +70 ns adder is invisible.
+   (`model_parameters.csv`)
 2. **Per-access hit rate overstates what a token sees.** Under top-2, a token avoids CXL only if
    *both* experts are resident. At layer 15 LRU hits 59.5% of accesses but serves only 37.1% of
    tokens entirely from HBM. At layer 31, static placement keeps *more* tokens fully resident
@@ -54,7 +55,7 @@ Numbers are from `results/` as of 14 Sept 2026; the dashboard always shows the c
    real top-2 workload, every deployable policy at both layers lands within 55.0–59.5%.
    (`real_trace_results.csv`)
 4. **Migration cost erases LRU's edge at layer 31.** LRU is 0.6% faster than static at layer 31
-   when installing an expert is free, and loses that lead once an install costs 10% of a full
+   when installing an expert is free, and loses that lead once an install costs 8.8% of a full
    HBM write. At layer 15 it is still 1.9% ahead at a full write. (`migration_sensitivity.csv`)
 5. **Periodic re-profiling's best cadence undercuts its purpose.** On the real traces the best
    interval is the shortest tested, 100 tokens. At 2,000+ tokens (layer 15) or 1,000+ tokens
@@ -67,9 +68,10 @@ Numbers are from `results/` as of 14 Sept 2026; the dashboard always shows the c
 7. **Tiering is a small-batch technique.** At batch 1 a decode step needs 2 experts; from batch 4
    most steps need more than a 4-expert budget holds, and by batch 32 every expert is touched every
    step. Steps that never touch CXL fall from 32.5% to 0. (`batch_sensitivity.csv`)
-8. **More, smaller experts make tiering harder, not easier.** With top-2 fixed, the share of
-   tokens fully in HBM stays at 35–44% from 8 to 128 experts; with top-4 at 128 experts it falls
-   to 18.6%. top-k dominates, not N. (`scalability_sweep.csv`)
+8. **More, smaller experts make tiering harder, not easier.** With HBM holding half the experts
+   and top-2 fixed, 35–44% of tokens are served fully from HBM from 8 to 256 experts. Let top-k
+   grow with N and it falls to 18.6% at 128 experts (top-4) and 3.3% at 256 experts (top-8,
+   DeepSeek-V3's topology). top-k dominates, not N. (`scalability_sweep.csv`)
 9. **Pooling trades capacity for bandwidth.** Sharing one CXL copy of the cold experts across 32
    replicas saves 1,398 GB (1.94× consolidation), but on one link each replica's fetches are 28.7×
    slower. Links must scale with replicas. (`pooling_study.csv`)
@@ -117,17 +119,24 @@ including the numbers in its prose — from the result files.
 
 ## DRAMSim3
 
-DRAMSim3 runs outside the pipeline (WSL2), on the trace `generate_trace.py` writes
-(`data/dramsim3_loaded.txt`: 256,000 back-to-back 64 B reads, each expert fetch continuing through
-that expert's address range). Two runs, each ending when its trace does:
+DRAMSim3 runs outside the pipeline (WSL2), on two traces `generate_trace.py` writes. Both hold
+the same 256,000 64 B reads, each expert fetch continuing through that expert's address range;
+`dramsim3_loaded.txt` issues them back-to-back, `dramsim3_unloaded.txt` one every 100 cycles.
+Four runs, each ending when its trace does:
 
-| Run | Config | Result |
-|---|---|---|
-| HBM tier | `HBM2_8Gb_x128.ini`, `-c 271000` | 8/8 channels, 23.6% utilised (DRAMSim3's trace reader caps HBM2 at 25%), 1.632 pJ/bit |
-| CXL-side DRAM | `DDR4_8Gb_x8_3200.ini`, `-c 1250000` | 81.3% utilised, 9.080 pJ/bit |
+| Run | Config | Gives the model | Result |
+|---|---|---|---|
+| `hbm2_loaded` | `HBM2_8Gb_x128.ini`, `-c 271000` | HBM energy per bit | 8/8 channels, 23.6% utilised (DRAMSim3's trace reader caps HBM2 at 25%), **1.632 pJ/bit** |
+| `ddr4_cxl` | `DDR4_8Gb_x8_3200.ini`, `-c 1250000` | CXL-side DRAM energy per bit | 81.3% utilised, **9.080 pJ/bit** |
+| `hbm2_idle` | `HBM2_8Gb_x128.ini`, `-c 25600000` | HBM read latency | **32.66 ns** |
+| `ddr4_idle` | `DDR4_8Gb_x8_3200.ini`, `-c 25600000` | CXL-side DRAM read latency | **28.33 ns** (+ 70 ns cited CXL adder) |
 
-Energy is read + activate energy per DRAM command. Stats and commands are in `dramsim3/`;
-`parse_dramsim3.py` turns them into `results/dramsim3_*_summary.csv`, which `config.py` reads.
+Energy is read + activate energy per DRAM command. DDR4-3200 stands in for DDR5, which DRAMSim3
+does not ship. Stats and exact commands are in `dramsim3/` (kept byte-for-byte — re-running
+DRAMSim3 reproduces them exactly); `parse_dramsim3.py` turns them into
+`results/dramsim3_*_summary.csv`, which `config.py` reads. As a cross-check, the idle HBM2 run
+gives 1.764 pJ/bit, matching the 1.756 of the project's original idle run; the loaded run is
+lower (1.632) because streaming reads hit an open DRAM row more often (96% vs 88%).
 
 ---
 
@@ -148,7 +157,10 @@ Energy is read + activate energy per DRAM command. Stats and commands are in `dr
   linear functions of hit rate and every latency chart is a hit-rate chart rescaled.
 - **Per-access re-fetch.** Each access is charged a full expert transfer, so absolute times are
   expert-fetch times, not decode latencies. Comparisons between policies survive.
-- **HBM latency** (60.78 ns) is an idle-load DRAM device latency, not load-to-use.
+- **Latencies** (HBM 32.66 ns, CXL-side DRAM 28.33 ns) are idle DRAM read latencies measured
+  with DRAMSim3, not end-to-end load-to-use; the CXL link adds a cited 70 ns.
+- **Bandwidths** are assumed: 800 GB/s per HBM3-class stack, 64 GB/s for one CXL x16 link at
+  PCIe Gen5 rates (per direction).
 - **Energy.** CXL DRAM is measured with DDR4-3200 standing in for DDR5 (DRAMSim3 has no DDR5
   config); the 5.0 pJ/bit link figure is cited, not simulated. The DRAMSim3 trace is a scaled
   sample (8 × 64 B reads per expert fetch).

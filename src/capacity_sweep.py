@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 
 from config import (
     DATA_DIR, RESULTS_DIR, ENCODING, NUM_EXPERTS, SEED, NUM_RANDOM_TRIALS,
-    HBM_TIME_NS, CXL_TIME_NS,
+    HBM_TIME_NS, CXL_TIME_NS, EXPERT_SIZE_BYTES,
 )
 import tier_simulator as ts
 
@@ -45,7 +45,7 @@ def run(trace_df, num_experts=NUM_EXPERTS, num_trials=NUM_RANDOM_TRIALS, seed=SE
         rand_t = rand["avg_time_ns_mean"]
         rows.append({
             "num_experts_in_hbm": k,
-            "hbm_budget_gb": k * 352321536 / 1e9,
+            "hbm_budget_gb": k * EXPERT_SIZE_BYTES / 1e9,
             "static_hit_rate_pct": static["hit_rate_pct"],
             "static_avg_time_ns": smart_t,
             "random_hit_rate_pct": rand["hit_rate_mean"] * 100,

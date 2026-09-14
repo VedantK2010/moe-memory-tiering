@@ -1,0 +1,3 @@
+# DRAMSim3 output is kept byte-for-byte as the simulator wrote it (Linux line
+# endings), so a re-run can be compared against the committed stats with cmp.
+dramsim3/** -text

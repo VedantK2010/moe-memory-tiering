@@ -30,7 +30,7 @@ hit-rate results in joules rather than corroborating them.
 
 ### 11.2 At expert granularity this is a bandwidth study
 
-At 352 MB per expert the transfer term dominates: latency is about 0.003% of a CXL fetch, so the
+At 352 MB per expert the transfer term dominates: latency is under 0.002% of a CXL fetch, so the
 CXL/HBM time ratio (12.5×) equals the bandwidth ratio. CXL's latency adder is invisible at this
 granularity. That is a finding, but it also means our conclusions say nothing about latency-bound
 access patterns. (`results/model_parameters.csv`)
@@ -49,14 +49,17 @@ and on DDR4-3200, which stands in for the DDR5 behind a CXL expander because DRA
 configuration. The CXL link energy (SerDes + PHY) is a cited figure, not simulated. The DRAMSim3
 input is a scaled sample of the access pattern — eight 64 B reads per expert fetch, each fetch
 continuing through the expert — not full 352 MB transfers. HBM2 utilisation is capped at 25% by
-DRAMSim3's trace reader (one request per cycle); our run reached 23.6%.
-(`results/dramsim3_*_summary.csv`, `dramsim3/`)
+DRAMSim3's trace reader (one request per cycle); our run reached 23.6%. The two device
+latencies (HBM2 32.66 ns, DDR4 28.33 ns) are DRAMSim3 idle read latencies — DRAM-side, not
+end-to-end load-to-use — and the CXL link's +70 ns is cited. Bandwidths (800 GB/s per HBM stack,
+64 GB/s for one CXL x16 Gen5 link) are assumptions. (`results/dramsim3_*_summary.csv`,
+`results/model_parameters.csv`, `dramsim3/`)
 
 ### 11.5 Migration is charged only in the sensitivity study
 
 The headline comparisons treat installing an expert into HBM as free, which flatters LRU (it
 migrates on every miss). The migration study charges a fraction of a full HBM write per install:
-LRU's advantage at layer 31 disappears at 10% of a full write, while at layer 15 LRU remains ahead
+LRU's advantage at layer 31 disappears at 8.8% of a full write, while at layer 15 LRU remains ahead
 even at a full write. Real systems overlap part of an install with compute, so the true factor
 lies between these bounds. (`results/migration_sensitivity.csv`)
 
@@ -137,7 +140,8 @@ an upper bound on latency hidden.
 | "~8% energy savings" from a 21.08 nJ/fetch constant | **Wrong basis.** That constant was mostly standby power. | LRU saves 7.8% (layer 15) and 0.6% (layer 31) with measured DRAM energy (`energy_metrics.csv`) |
 | "Re-profiling every ~2,000 tokens is optimal" | Holds on the synthetic phased trace only. On real traces the best interval is 100 tokens, and 2,000 tokens scores below static at layer 15. | Quote each periodic number with its interval and trace (`real_periodic_sweep.csv`, `nonstationary_by_phase.csv`) |
 | "Hybrid falls from 2nd to 4th on dataset 2" | **No longer true.** All four policies keep their rank on both datasets. | `robustness_check.csv` |
-| Expert size 16 MiB; HBM 150 ns | **Superseded.** Real Mixtral expert: 352 MB. HBM latency 60.78 ns. | `model_parameters.csv` |
+| Expert size 16 MiB; HBM 150 ns | **Superseded.** Real Mixtral expert: 352 MB. HBM latency 32.66 ns and CXL-side DRAM 28.33 ns, both measured with DRAMSim3. | `model_parameters.csv` |
+| Absolute fetch times from earlier runs (e.g. 410 µs per HBM fetch) | **7.4% too low** — sizes were converted with 1024³ against decimal GB/s. Ratios, hit rates and energy were unaffected. | 440 µs HBM, 5.51 ms CXL (`model_parameters.csv`) |
 | Real traces are top-1 only | **Fixed.** Both routed experts are used. | — |
 | "No migration cost; not yet run" | **Now run.** | §11.5, `migration_sensitivity.csv` |
 
@@ -146,8 +150,10 @@ an upper bound on latency hidden.
 - **Token-level residency:** at layer 15, LRU serves 59.5% of accesses from HBM but only 37.1% of
   tokens entirely from HBM; at layer 31, static keeps more tokens fully resident than LRU
   (43.6% vs 39.8%).
-- **Migration cost** (§11.5), **batch size** (§11.6), **expert count vs top-k**
-  (`scalability_sweep.csv`), **CXL pooling** (`pooling_study.csv`).
+- **Migration cost** (§11.5), **batch size** (§11.6), **CXL pooling** (`pooling_study.csv`).
+- **Expert count vs top-k** (`scalability_sweep.csv`): with HBM holding half the experts, top-2
+  keeps 35–44% of tokens fully in HBM from 8 to 256 experts; a DeepSeek-V3-like 256-expert top-8
+  layer keeps 3.3%.
 - **Prefetching negative result:** 70 configurations on 7 datasets, mean accuracy 29.1%; on the
   real traces it hides 3.1–4.9 more points of accesses for 14–15% more CXL traffic and energy.
 - **Measured energy:** HBM 1.632 pJ/bit; CXL 14.08 pJ/bit = 9.080 measured DRAM (DDR4 proxy) +

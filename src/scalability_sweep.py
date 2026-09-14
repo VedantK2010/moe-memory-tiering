@@ -40,12 +40,14 @@ import matplotlib.pyplot as plt
 
 from config import (
     RESULTS_DIR, ENCODING, SEED, SYNTH_SKEW_ALPHA, SYNTH_P_REPEAT,
-    EXPERT_SIZE_BYTES, NUM_LAYERS,
+    EXPERT_SIZE_BYTES, NUM_LAYERS, NUM_EXPERTS,
 )
 import tier_simulator as ts
 from generate_trace import _solve_forced_repeat
 
-EXPERT_COUNTS = [8, 16, 32, 64, 128]
+# Up to 256 experts so the scaled-k regime reaches DeepSeek-V3's topology
+# (256 experts, top-8 = 256/32).
+EXPERT_COUNTS = [8, 16, 32, 64, 128, 256]
 BUDGET_FRACTIONS = [0.125, 0.25, 0.5]
 TOKENS = 40_000
 
@@ -86,8 +88,8 @@ def main():
             k = k_of(n)
             trace = synth_trace(n, k)
             ranked = ts.rank_experts(trace, n)
-            # Each expert is 1/N of a fixed total expert budget per layer.
-            expert_bytes = EXPERT_SIZE_BYTES * 8 / n
+            # Each expert is 1/N of Mixtral's per-layer expert weight.
+            expert_bytes = EXPERT_SIZE_BYTES * NUM_EXPERTS / n
 
             for frac in BUDGET_FRACTIONS:
                 cap = max(1, int(round(n * frac)))

@@ -1,0 +1,2 @@
+label,device,channels,active_channels,cycles,reads,read_cmds,merged_reads_pct,tck_ns,avg_read_latency_ns,row_hit_rate_pct,dram_bandwidth_gbps,peak_bandwidth_gbps,utilisation_pct,frontend_ceiling_pct,idle_cycles_pct,dynamic_energy_pj,dynamic_pj_per_access,dynamic_pj_per_bit,background_share_pct
+hbm2_idle,HBM2,8,8,25600000.0,256001.0,256000.0,0.0003906234741270542,1.0,32.66049795112764,88.0046782023981,0.64,256.0,0.25,25.0,69.05255810546875,231250224.0,903.3211875,1.7642991943359374,98.39379749324107

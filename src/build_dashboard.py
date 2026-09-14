@@ -29,7 +29,7 @@ from config import (
     CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, HBM_TIME_NS, CXL_TIME_NS,
     HBM_PJ_PER_BIT, CXL_DRAM_PJ_PER_BIT, CXL_LINK_PJ_PER_BIT, CXL_PJ_PER_BIT,
     HBM_EXPERT_FETCH_PJ, CXL_EXPERT_FETCH_PJ, CXL_ENERGY_BASIS, REAL_WARMUP_TOKENS,
-    require_dramsim_energy,
+    require_dramsim_results,
 )
 
 DASHBOARD = PROJECT_ROOT / "dashboard" / "index.html"
@@ -47,12 +47,14 @@ def model_parameters():
         ("num_random_trials", NUM_RANDOM_TRIALS, "placements", "random baseline draws per budget"),
         ("expert_bytes", EXPERT_SIZE_BYTES, "B", "derived: 3 x 4096 x 14336 x 2 B"),
         ("expert_gb_all_layers", EXPERT_BYTES_ALL_LAYERS / 1e9, "GB", "derived"),
-        ("hbm_latency_ns", HBM_LATENCY_NS, "ns", "measured: earlier idle DRAMSim3 HBM2 run"),
+        ("hbm_latency_ns", HBM_LATENCY_NS, "ns", "measured: DRAMSim3 HBM2, idle trace"),
         ("hbm_bandwidth_gbps", HBM_BANDWIDTH_GBPS, "GB/s", "assumed: HBM3-class stack"),
-        ("cxl_device_latency_ns", CXL_DEVICE_LATENCY_NS, "ns", "assumed: DDR5-class device"),
+        ("cxl_device_latency_ns", CXL_DEVICE_LATENCY_NS, "ns",
+         "measured: DRAMSim3 DDR4-3200 (DDR5 proxy), idle trace"),
         ("cxl_added_latency_ns", CXL_ADDED_LATENCY_NS, "ns", "cited: CXL controller + PHY adder"),
         ("cxl_latency_ns", CXL_LATENCY_NS, "ns", "derived: device + adder"),
-        ("cxl_bandwidth_gbps", CXL_BANDWIDTH_GBPS, "GB/s", "assumed: one CXL 2.0 x8 Gen5 link"),
+        ("cxl_bandwidth_gbps", CXL_BANDWIDTH_GBPS, "GB/s",
+         "assumed: one CXL x16 link at PCIe Gen5 rates, per direction"),
         ("hbm_time_ns", HBM_TIME_NS, "ns/expert fetch", "derived: latency + size/bandwidth"),
         ("cxl_time_ns", CXL_TIME_NS, "ns/expert fetch", "derived: latency + size/bandwidth"),
         ("hbm_pj_per_bit", HBM_PJ_PER_BIT, "pJ/bit", "measured: DRAMSim3 HBM2"),
@@ -86,7 +88,7 @@ def records(name, cols=None):
 
 
 def build_data():
-    require_dramsim_energy()
+    require_dramsim_results()
     params = model_parameters()
     params.to_csv(RESULTS_DIR / "model_parameters.csv", index=False, encoding=ENCODING)
 
@@ -105,7 +107,9 @@ def build_data():
         "params": {r["name"]: _clean(r["value"]) for r in params.to_dict("records")},
         "energy_basis": CXL_ENERGY_BASIS,
         "dramsim": records("dramsim3_hbm2_loaded_summary.csv")
-                   + records("dramsim3_ddr4_cxl_summary.csv"),
+                   + records("dramsim3_ddr4_cxl_summary.csv")
+                   + records("dramsim3_hbm2_idle_summary.csv")
+                   + records("dramsim3_ddr4_idle_summary.csv"),
         "capacity": records("capacity_sweep.csv"),
         "real": records("real_trace_results.csv"),
         "residency": records("real_token_residency.csv"),
