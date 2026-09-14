@@ -32,6 +32,7 @@ STAGES = [
     ("pooling_study",            "CXL memory expansion and pooling"),
     ("prefetch_simulator",       "Markov prefetching across a dataset suite (negative result)"),
     ("build_dashboard",          "Write results/ into dashboard/index.html"),
+    ("check_numbers",            "Check every number README / REPORT_ADDENDUM quote against results/"),
 ]
 
 REAL_STAGES = {"real_benchmark", "calc_energy", "batch_sensitivity",

@@ -46,9 +46,13 @@ identical rules, survive.
 
 DRAM energy per bit is measured with DRAMSim3 (read + activate energy per DRAM command) on HBM2
 and on DDR4-3200, which stands in for the DDR5 behind a CXL expander because DRAMSim3 has no DDR5
-configuration. The CXL link energy (SerDes + PHY) is a cited figure, not simulated. The DRAMSim3
-input is a scaled sample of the access pattern — eight 64 B reads per expert fetch, each fetch
-continuing through the expert — not full 352 MB transfers. HBM2 utilisation is capped at 25% by
+configuration. The CXL link energy (SerDes + PHY) is a cited figure, not simulated: 11.4 pJ/bit,
+from the first published PCIe Gen5 SerDes including PLL and clocking [9]. Short-reach transceivers
+are cheaper and a CXL controller adds cost that figure does not count, so every energy saving is
+re-computed with the link energy swept from 0 to 14 pJ/bit: LRU's layer-15 saving moves between
+6.8% and 8.6%, and the ranking of policies never changes. (`results/energy_link_sensitivity.csv`)
+The DRAMSim3 input is a scaled sample of the access pattern — eight 64 B reads per expert fetch,
+each fetch continuing through the expert — not full 352 MB transfers. HBM2 utilisation is capped at 25% by
 DRAMSim3's trace reader (one request per cycle); our run reached 23.6%. The two device
 latencies (HBM2 32.66 ns, DDR4 28.33 ns) are DRAMSim3 idle read latencies — DRAM-side, not
 end-to-end load-to-use — and the CXL link's +70 ns is cited. Bandwidths (800 GB/s per HBM stack,
@@ -66,7 +70,8 @@ lies between these bounds. (`results/migration_sensitivity.csv`)
 ### 11.6 Batch-1 decode only
 
 Except for the batch-size study, every result assumes batch-1 decode. The batch study shows why
-this matters: by batch 32 every expert is touched every step, and no placement avoids CXL.
+this matters: by batch 32 a step touches 7.99 of the 8 experts on average, and no placement
+avoids CXL.
 (`results/batch_sensitivity.csv`)
 
 ### 11.7 Real traces cover one model family and two layers
@@ -95,7 +100,7 @@ an upper bound on latency hidden.
 | Correction | Expected effect |
 |---|---|
 | Model tile-granularity reads instead of full re-fetch | Lowers absolute times; ranking of policies likely preserved |
-| Measure the CXL link energy, or use a real DDR5 config | Changes the CXL/HBM energy ratio and so every energy saving; hit-rate results unaffected |
+| Measure the CXL link energy, or use a real DDR5 config | Changes the CXL/HBM energy ratio and so every energy saving (a 0–14 pJ/bit link moves LRU's layer-15 saving between 6.8% and 8.6%); rankings and hit-rate results unaffected |
 | Charge migration in every comparison | Penalises LRU; at layer 31 favours static or periodic placement |
 | Larger batches | Removes most of the benefit of tiering (see 11.6) |
 | Real 64–256-expert models | Unknown; synthetic results suggest top-k, not expert count, dominates |
@@ -123,9 +128,10 @@ an upper bound on latency hidden.
    Journal 5(2), 1966. — The optimal offline policy, the natural upper bound for future work.
 8. Allen Institute for AI. *allenai/analysis_mixtral.* Hugging Face Datasets. — The recorded
    per-token, per-layer expert routing used for all real-trace results.
-
-**Still needed:** a source for the 5.0 pJ/bit CXL link energy (`CXL_LINK_PJ_PER_BIT` in
-`src/config.py`). Do not quote it without one.
+9. Bichan, M., Ting, C., Zand, B., et al. *A 32Gb/s NRZ 37dB SerDes in 10nm CMOS to Support PCI
+   Express Gen 5 Protocol.* IEEE Custom Integrated Circuits Conference (CICC), 2020,
+   doi:10.1109/CICC48029.2020.9075947. — The first PCIe Gen5 SerDes: 11.4 pJ/bit including PLL
+   and clocking over a 37 dB channel; the CXL link energy in our model.
 
 ---
 
@@ -137,7 +143,8 @@ an upper bound on latency hidden.
 |---|---|---|
 | "cycle-accurate DRAMSim3 simulations" | **False.** Latency is analytic. | "DRAMSim3-measured DRAM energy per bit; analytic timing model" (§11.1) |
 | "Middle layers reward reactivity, deep layers reward stability" / "depth changes the winner" | **Top-1 artifact.** Under real top-2 routing every deployable policy lands within 55.0–59.5% at both layers. | The top-1 vs top-2 comparison and token-level residency (`real_trace_results.csv`, `real_token_residency.csv`) |
-| "~8% energy savings" from a 21.08 nJ/fetch constant | **Wrong basis.** That constant was mostly standby power. | LRU saves 7.8% (layer 15) and 0.6% (layer 31) with measured DRAM energy (`energy_metrics.csv`) |
+| "~8% energy savings" from a 21.08 nJ/fetch constant | **Wrong basis.** That constant was mostly standby power. | LRU saves 8.4% (layer 15) and 0.6% (layer 31) with measured DRAM energy and a cited link (`energy_metrics.csv`) |
+| CXL link energy 5.0 pJ/bit (earlier drafts and code) | **No source was ever recorded.** | 11.4 pJ/bit cited from Bichan et al., CICC 2020 [9], with every saving swept from 0 to 14 pJ/bit (`energy_link_sensitivity.csv`) |
 | "Re-profiling every ~2,000 tokens is optimal" | Holds on the synthetic phased trace only. On real traces the best interval is 100 tokens, and 2,000 tokens scores below static at layer 15. | Quote each periodic number with its interval and trace (`real_periodic_sweep.csv`, `nonstationary_by_phase.csv`) |
 | "Hybrid falls from 2nd to 4th on dataset 2" | **No longer true.** All four policies keep their rank on both datasets. | `robustness_check.csv` |
 | Expert size 16 MiB; HBM 150 ns | **Superseded.** Real Mixtral expert: 352 MB. HBM latency 32.66 ns and CXL-side DRAM 28.33 ns, both measured with DRAMSim3. | `model_parameters.csv` |
@@ -155,9 +162,13 @@ an upper bound on latency hidden.
   keeps 35–44% of tokens fully in HBM from 8 to 256 experts; a DeepSeek-V3-like 256-expert top-8
   layer keeps 3.3%.
 - **Prefetching negative result:** 70 configurations on 7 datasets, mean accuracy 29.1%; on the
-  real traces it hides 3.1–4.9 more points of accesses for 14–15% more CXL traffic and energy.
-- **Measured energy:** HBM 1.632 pJ/bit; CXL 14.08 pJ/bit = 9.080 measured DRAM (DDR4 proxy) +
-  5.0 cited link.
+  real traces it hides 3.1–4.9 more points of accesses for 15–16% more CXL traffic and 14–15%
+  more energy.
+- **Measured energy:** HBM 1.632 pJ/bit; CXL 20.48 pJ/bit = 9.080 measured DRAM (DDR4 proxy) +
+  11.4 cited link. One expert fetch: 4.60 mJ from HBM, 57.72 mJ from CXL (`model_parameters.csv`).
+- **Link-energy sensitivity** (`energy_link_sensitivity.csv`): with the link swept from 0 to
+  14 pJ/bit, LRU's layer-15 saving stays between 6.8% and 8.6% and periodic re-profiling's
+  layer-31 saving between 3.9% and 4.9%; the ranking of policies never changes.
 
 ### B3. Report structure
 
@@ -165,4 +176,7 @@ an upper bound on latency hidden.
 - Title-page suggestion: *CXL-Based Memory Optimisation for Mixture-of-Experts Models —
   bandwidth, residency and placement across HBM and CXL-attached memory.* (The earlier subtitle,
   "Depth-dependent expert placement", describes the top-1 artifact.)
-- Code and dashboard: `https://github.com/VedantK2010/moe-memory-tiering`, `dashboard/index.html`.
+- Code: `https://github.com/VedantK2010/moe-memory-tiering`. Live dashboard:
+  `https://vedantk2010.github.io/moe-memory-tiering/dashboard/`.
+- Before submitting, run `python src/check_numbers.py`: it fails if any number quoted in the
+  README or in this file no longer matches `results/`.

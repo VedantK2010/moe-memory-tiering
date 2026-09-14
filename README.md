@@ -9,6 +9,8 @@ We replay recorded Mixtral routing — 829,440 tokens at each of two layers, top
 expert choices — through an analytic HBM/CXL tier model, and measure both tiers' DRAM energy per
 bit with DRAMSim3.
 
+**Live dashboard:** <https://vedantk2010.github.io/moe-memory-tiering/dashboard/>
+
 ---
 
 ## Quick start
@@ -19,8 +21,9 @@ python src/convert_real_data.py   # once: downloads the real Mixtral traces into
 python run_all.py                 # regenerates every CSV, figure and the dashboard (~2.5 min)
 ```
 
-Then open **[`dashboard/index.html`](dashboard/index.html)** in any browser. It is a single page
-with a live policy replay, a hardware configurator, and every result below.
+Then open **[`dashboard/index.html`](dashboard/index.html)** in any browser (or use the live link
+above). It is a single page with a live policy replay, a hardware configurator, and every result
+below.
 
 `python run_all.py --list` shows the stages; `--skip-real` skips the ones that need the real
 traces.
@@ -61,13 +64,15 @@ Numbers are from `results/` as of 14 Sept 2026; the dashboard always shows the c
    interval is the shortest tested, 100 tokens. At 2,000+ tokens (layer 15) or 1,000+ tokens
    (layer 31) it scores below static placement. (`real_periodic_sweep.csv`)
 6. **Energy follows the hit rate.** With both tiers' DRAM measured (HBM 1.632 pJ/bit; CXL DRAM
-   9.080 pJ/bit using DDR4-3200 as a DDR5 proxy, plus a cited 5.0 pJ/bit link), LRU saves 7.8% of
-   memory energy at layer 15 and 0.6% at layer 31; periodic re-profiling (every 100 tokens) saves
-   6.0% and 4.5%. Energy is a linear function of hit rate, so this is a cost translation, not
-   independent evidence. (`energy_metrics.csv`)
+   9.080 pJ/bit using DDR4-3200 as a DDR5 proxy, plus an 11.4 pJ/bit PCIe Gen5 link cited from
+   Bichan et al., CICC 2020), LRU saves 8.4% of memory energy at layer 15 and 0.6% at layer 31;
+   periodic re-profiling (every 100 tokens) saves 6.5% and 4.8%. Sweeping the link energy from 0
+   to 14 pJ/bit moves LRU's layer-15 saving between 6.8% and 8.6% and never changes the ranking.
+   Energy is a linear function of hit rate, so this is a cost translation, not independent
+   evidence. (`energy_metrics.csv`, `energy_link_sensitivity.csv`)
 7. **Tiering is a small-batch technique.** At batch 1 a decode step needs 2 experts; from batch 4
-   most steps need more than a 4-expert budget holds, and by batch 32 every expert is touched every
-   step. Steps that never touch CXL fall from 32.5% to 0. (`batch_sensitivity.csv`)
+   most steps need more than a 4-expert budget holds, and by batch 32 a step touches 7.99 of the
+   8 experts on average. Steps that never touch CXL fall from 32.5% to 0. (`batch_sensitivity.csv`)
 8. **More, smaller experts make tiering harder, not easier.** With HBM holding half the experts
    and top-2 fixed, 35–44% of tokens are served fully from HBM from 8 to 256 experts. Let top-k
    grow with N and it falls to 18.6% at 128 experts (top-4) and 3.3% at 256 experts (top-8,
@@ -77,7 +82,7 @@ Numbers are from `results/` as of 14 Sept 2026; the dashboard always shows the c
    slower. Links must scale with replicas. (`pooling_study.csv`)
 10. **Prefetching is a negative result.** Across 70 configurations on 7 datasets, mean prediction
     accuracy is 29.1%. On the real traces the best setting hides 3.1–4.9 more points of accesses
-    for 14–15% more CXL traffic and energy. Prefetching can only hide latency; it never saves
+    for 15–16% more CXL traffic and 14–15% more energy. Prefetching can only hide latency; it never saves
     bandwidth or energy. (`prefetch_multi_dataset.csv`)
 11. **The policy ranking is robust.** On an independent synthetic dataset with sharper skew, all
     four policies keep their rank; periodic re-profiling is first on both (best intervals 2,000
@@ -106,6 +111,7 @@ src/pooling_study.py            CXL expansion and pooling
 src/prefetch_simulator.py       Markov prefetching across a dataset suite
 src/parse_dramsim3.py           DRAMSim3 stats -> results/
 src/build_dashboard.py          results/ -> dashboard/index.html, model_parameters.csv
+src/check_numbers.py            checks every number this README and REPORT_ADDENDUM quote against results/
 results/                        every CSV and figure — the single source for all numbers
 dramsim3/                       DRAMSim3 stats and the exact command for each run
 data/                           traces (gitignored; regenerable)
@@ -113,7 +119,9 @@ data/                           traces (gitignored; regenerable)
 
 **No number is typed by hand anywhere downstream of `results/`.** `config.py` reads the measured
 energy from the DRAMSim3 summaries, and `build_dashboard.py` injects every dashboard figure —
-including the numbers in its prose — from the result files.
+including the numbers in its prose — from the result files. The last stage of `run_all.py`,
+`check_numbers.py`, fails if any number quoted in this README or in `REPORT_ADDENDUM.md` no longer
+matches `results/`.
 
 ---
 
@@ -145,7 +153,7 @@ lower (1.632) because streaming reads hit an open DRAM row more often (96% vs 88
 | File | How to get it |
 |---|---|
 | `data/expert_trace.csv`, `nonstationary_trace.csv`, `dataset2_trace.csv`, `dramsim3_*.txt` | generated by `python run_all.py` |
-| `data/real_expert_trace.csv` (layer 15), `data/real_expert_trace_layer31.csv` | `python src/convert_real_data.py` (downloads ~24 MB once) |
+| `data/real_expert_trace.csv` (layer 15), `data/real_expert_trace_layer31.csv` | `python src/convert_real_data.py` (downloads ~24 MB once; reproduces both files byte for byte) |
 
 ---
 
@@ -162,8 +170,9 @@ lower (1.632) because streaming reads hit an open DRAM row more often (96% vs 88
 - **Bandwidths** are assumed: 800 GB/s per HBM3-class stack, 64 GB/s for one CXL x16 link at
   PCIe Gen5 rates (per direction).
 - **Energy.** CXL DRAM is measured with DDR4-3200 standing in for DDR5 (DRAMSim3 has no DDR5
-  config); the 5.0 pJ/bit link figure is cited, not simulated. The DRAMSim3 trace is a scaled
-  sample (8 × 64 B reads per expert fetch).
+  config); the 11.4 pJ/bit link figure is cited (the first published PCIe Gen5 SerDes, including
+  PLL and clocking), not simulated, and every energy saving is re-computed from 0 to 14 pJ/bit.
+  The DRAMSim3 trace is a scaled sample (8 × 64 B reads per expert fetch).
 - **Batch-1 decode** everywhere except the batch-size study.
 - **Real traces** cover two layers of one model family; expert popularity is domain-dependent.
 - **Synthetic traces** are used where a controlled change is needed (shift, robustness,
@@ -181,6 +190,9 @@ lower (1.632) because streaming reads hit an open DRAM row more often (96% vs 88
 - CXL Consortium, *Compute Express Link Specification, Revision 2.0*, 2020.
 - Sun et al., *Demystifying CXL Memory with Genuine CXL-Ready Systems and Devices*, MICRO-56,
   2023 — measured CXL latency overheads.
+- Bichan, Ting, Zand, et al., *A 32Gb/s NRZ 37dB SerDes in 10nm CMOS to Support PCI Express
+  Gen 5 Protocol*, IEEE CICC 2020, doi:10.1109/CICC48029.2020.9075947 — the CXL link energy
+  (11.4 pJ/bit).
 - Mattson, Gecsei, Slutz & Traiger, *Evaluation Techniques for Storage Hierarchies*, IBM Systems
   Journal 9(2), 1970.
 - Allen Institute for AI, `allenai/analysis_mixtral` (Hugging Face) — the recorded routing traces.
