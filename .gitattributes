@@ -1,3 +1,7 @@
 # DRAMSim3 output is kept byte-for-byte as the simulator wrote it (Linux line
 # endings), so a re-run can be compared against the committed stats with cmp.
 dramsim3/** -text
+
+# build_dashboard.py writes the dashboard with LF; check it out the same way so
+# a pipeline run never shows it as modified when nothing changed.
+dashboard/index.html text eol=lf
