@@ -16,8 +16,8 @@ hbm_time_ns,440434.58049795113,ns/expert fetch,derived: latency + size/bandwidth
 cxl_time_ns,5505122.328348757,ns/expert fetch,derived: latency + size/bandwidth
 hbm_pj_per_bit,1.6321004333496094,pJ/bit,measured: DRAMSim3 HBM2
 cxl_dram_pj_per_bit,9.08016357421875,pJ/bit,measured: DRAMSim3 DDR4-3200 as DDR5 proxy
-cxl_link_pj_per_bit,5.0,pJ/bit,cited: PCIe Gen5 SerDes + PHY
-cxl_pj_per_bit,14.08016357421875,pJ/bit,derived: DRAM + link
+cxl_link_pj_per_bit,11.4,pJ/bit,"cited: Bichan et al., IEEE CICC 2020 (first PCIe Gen5 SerDes, incl. PLL + clocking)"
+cxl_pj_per_bit,20.48016357421875,pJ/bit,derived: DRAM + link
 hbm_fetch_mj,4.600193052672,mJ/expert fetch,derived
-cxl_fetch_mj,39.68595886079999,mJ/expert fetch,derived
+cxl_fetch_mj,57.724821504,mJ/expert fetch,derived
 real_warmup_tokens,20000.0,tokens,"profiling prefix, never scored"

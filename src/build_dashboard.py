@@ -28,7 +28,8 @@ from config import (
     HBM_LATENCY_NS, HBM_BANDWIDTH_GBPS, CXL_DEVICE_LATENCY_NS, CXL_ADDED_LATENCY_NS,
     CXL_LATENCY_NS, CXL_BANDWIDTH_GBPS, HBM_TIME_NS, CXL_TIME_NS,
     HBM_PJ_PER_BIT, CXL_DRAM_PJ_PER_BIT, CXL_LINK_PJ_PER_BIT, CXL_PJ_PER_BIT,
-    HBM_EXPERT_FETCH_PJ, CXL_EXPERT_FETCH_PJ, CXL_ENERGY_BASIS, REAL_WARMUP_TOKENS,
+    HBM_EXPERT_FETCH_PJ, CXL_EXPERT_FETCH_PJ, CXL_ENERGY_BASIS, CXL_LINK_SOURCE,
+    REAL_WARMUP_TOKENS,
     require_dramsim_results,
 )
 
@@ -60,7 +61,7 @@ def model_parameters():
         ("hbm_pj_per_bit", HBM_PJ_PER_BIT, "pJ/bit", "measured: DRAMSim3 HBM2"),
         ("cxl_dram_pj_per_bit", CXL_DRAM_PJ_PER_BIT, "pJ/bit",
          "measured: DRAMSim3 DDR4-3200 as DDR5 proxy"),
-        ("cxl_link_pj_per_bit", CXL_LINK_PJ_PER_BIT, "pJ/bit", "cited: PCIe Gen5 SerDes + PHY"),
+        ("cxl_link_pj_per_bit", CXL_LINK_PJ_PER_BIT, "pJ/bit", f"cited: {CXL_LINK_SOURCE}"),
         ("cxl_pj_per_bit", CXL_PJ_PER_BIT, "pJ/bit", "derived: DRAM + link"),
         ("hbm_fetch_mj", HBM_EXPERT_FETCH_PJ / 1e9, "mJ/expert fetch", "derived"),
         ("cxl_fetch_mj", CXL_EXPERT_FETCH_PJ / 1e9, "mJ/expert fetch", "derived"),
@@ -106,6 +107,7 @@ def build_data():
     return {
         "params": {r["name"]: _clean(r["value"]) for r in params.to_dict("records")},
         "energy_basis": CXL_ENERGY_BASIS,
+        "link_source": CXL_LINK_SOURCE,
         "dramsim": records("dramsim3_hbm2_loaded_summary.csv")
                    + records("dramsim3_ddr4_cxl_summary.csv")
                    + records("dramsim3_hbm2_idle_summary.csv")
@@ -119,6 +121,7 @@ def build_data():
         "robustness": records("robustness_check.csv"),
         "migration": records("migration_sensitivity.csv"),
         "energy": records("energy_metrics.csv"),
+        "energy_link": records("energy_link_sensitivity.csv"),
         "batch": records("batch_sensitivity.csv"),
         "scalability": records("scalability_sweep.csv"),
         "pooling": records("pooling_study.csv"),

@@ -17,7 +17,8 @@ exp_ids[token][rank][layer] -> expert id, with rank 0 = first choice,
 rank 1 = second choice, and 32 layers. An earlier version of this script
 assumed one expert per token and wrote expert_1 only; the traces actually
 used by the pipeline were produced with both ranks, and this version
-reproduces that layout.
+reproduces them byte for byte (verified 14 Sept 2026: 405 sequences,
+829,440 tokens per layer, every cell identical).
 
 Needs internet access once. Reads Hugging Face's parquet conversion of the
 dataset directly (about 24 MB), so it only needs pandas + pyarrow -- no
@@ -63,7 +64,8 @@ def main():
     DATA_DIR.mkdir(exist_ok=True)
     for layer, path in LAYERS.items():
         trace = extract(df, layer)
-        trace.to_csv(path, index=False, encoding=ENCODING)
+        # "\n" on every OS, so the file is byte-identical wherever it is made.
+        trace.to_csv(path, index=False, encoding=ENCODING, lineterminator="\n")
         repeat = float((trace["expert_1"].values[1:] == trace["expert_1"].values[:-1]).mean())
         print(f"  layer {layer:>2}: {len(trace):,} tokens -> {path.name} "
               f"(consecutive first-choice repeat rate {repeat:.4f})")

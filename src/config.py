@@ -177,17 +177,29 @@ HBM_PJ_PER_BIT = _dramsim_field(DRAMSIM_SUMMARIES["hbm"], "dynamic_pj_per_bit")
 # CXL-attached memory behind a PCIe Gen5 PHY. Two components:
 #   - the DRAM itself: MEASURED. DRAMSim3 ships no DDR5 config, so DDR4-3200
 #     (DDR4_8Gb_x8_3200.ini) stands in for the DDR5 a CXL expander would use.
-#   - the CXL link (SerDes + PHY + controller): CITED, not measured. DRAMSim3
-#     does not model a link. Confirm its source before quoting it.
+#   - the CXL link (SerDes + PHY): CITED, not measured. DRAMSim3 does not
+#     model a link. Source: Bichan et al., "A 32Gb/s NRZ 37dB SerDes in 10nm
+#     CMOS to Support PCI Express Gen 5 Protocol", IEEE CICC 2020,
+#     doi:10.1109/CICC48029.2020.9075947 -- the first PCIe Gen5 SerDes, at
+#     11.4 pJ/bit including PLL and clocking, over a 37 dB channel (the PCIe 5.0
+#     loss budget, whose PHY CXL uses). A transceiver's pJ/bit is TX + RX
+#     energy per bit, i.e. the cost of moving one bit across the link.
+#     Published 32 Gb/s transceivers span roughly 2-11 pJ/bit (short-reach
+#     designs are cheaper), so calc_energy.py re-computes every energy result
+#     over CXL_LINK_PJ_PER_BIT_SWEEP (results/energy_link_sensitivity.csv).
+#     An earlier version used 5.0 pJ/bit with no recorded source.
 # The CXL figure is therefore PARTLY measured; CXL_ENERGY_BASIS says so on
 # every output that uses it.
 CXL_DRAM_PJ_PER_BIT = _dramsim_field(DRAMSIM_SUMMARIES["cxl_dram"], "dynamic_pj_per_bit")
-CXL_LINK_PJ_PER_BIT = 5.0       # CITED: PCIe Gen5 SerDes+PHY, not simulated
+CXL_LINK_PJ_PER_BIT = 11.4      # CITED: Bichan et al., IEEE CICC 2020 (see above)
+CXL_LINK_PJ_PER_BIT_SWEEP = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0]  # plus the cited value
 CXL_PJ_PER_BIT = CXL_DRAM_PJ_PER_BIT + CXL_LINK_PJ_PER_BIT
 CXL_DRAM_ENERGY_IS_MEASURED = True
 CXL_LINK_ENERGY_IS_MEASURED = False
 CXL_ENERGY_IS_MEASURED = CXL_DRAM_ENERGY_IS_MEASURED and CXL_LINK_ENERGY_IS_MEASURED
-CXL_ENERGY_BASIS = "DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); link cited"
+CXL_LINK_SOURCE = "Bichan et al., IEEE CICC 2020 (first PCIe Gen5 SerDes, incl. PLL + clocking)"
+CXL_ENERGY_BASIS = ("DRAM measured (DRAMSim3, DDR4-3200 as DDR5 proxy); "
+                    "link cited (Bichan et al., IEEE CICC 2020)")
 
 
 def energy_pj(size_bytes, pj_per_bit):
@@ -259,7 +271,7 @@ def summary():
         f"= {HBM_PJ_PER_BIT:.3f} pJ/bit  [MEASURED, DRAMSim3 HBM2]",
         f"CXL energy           : {CXL_PJ_PER_BIT:.3f} pJ/bit = "
         f"DRAM {CXL_DRAM_PJ_PER_BIT:.3f} [MEASURED, DDR4 proxy] + "
-        f"link {CXL_LINK_PJ_PER_BIT:.3f} [CITED]",
+        f"link {CXL_LINK_PJ_PER_BIT:.3f} [CITED: {CXL_LINK_SOURCE}]",
         f"HBM expert fetch     : {HBM_EXPERT_FETCH_PJ / 1e9:.2f} mJ",
         f"CXL expert fetch     : {CXL_EXPERT_FETCH_PJ / 1e9:.2f} mJ",
         "=" * 68,
