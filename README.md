@@ -18,7 +18,7 @@ bit with DRAMSim3.
 ```bash
 pip install -r requirements.txt
 python src/convert_real_data.py   # once: downloads the real Mixtral traces into data/
-python run_all.py                 # regenerates every CSV, figure and the dashboard (~2.5 min)
+python run_all.py                 # regenerates every CSV, figure and the dashboard (~5 min)
 ```
 
 Then open **[`dashboard/index.html`](dashboard/index.html)** in any browser (or use the live link
