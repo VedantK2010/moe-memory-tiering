@@ -111,7 +111,7 @@ src/pooling_study.py            CXL expansion and pooling
 src/prefetch_simulator.py       Markov prefetching across a dataset suite
 src/parse_dramsim3.py           DRAMSim3 stats -> results/
 src/build_dashboard.py          results/ -> dashboard/index.html, model_parameters.csv
-src/check_numbers.py            checks every number this README and REPORT_ADDENDUM quote against results/
+src/check_numbers.py            checks every number this README quotes against results/
 results/                        every CSV and figure — the single source for all numbers
 dramsim3/                       DRAMSim3 stats and the exact command for each run
 data/                           traces (gitignored; regenerable)
@@ -120,8 +120,7 @@ data/                           traces (gitignored; regenerable)
 **No number is typed by hand anywhere downstream of `results/`.** `config.py` reads the measured
 energy from the DRAMSim3 summaries, and `build_dashboard.py` injects every dashboard figure —
 including the numbers in its prose — from the result files. The last stage of `run_all.py`,
-`check_numbers.py`, fails if any number quoted in this README or in `REPORT_ADDENDUM.md` no longer
-matches `results/`.
+`check_numbers.py`, fails if any number quoted in this README no longer matches `results/`.
 
 ---
 

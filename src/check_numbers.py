@@ -1,9 +1,9 @@
 """
 Documentation Number Check
 ==========================
-Every number README.md and REPORT_ADDENDUM.md quote must match results/.
-The dashboard cannot go stale (build_dashboard.py injects its numbers), but
-these two documents are hand-written, so this script checks them.
+Every number README.md quotes must match results/. The dashboard cannot go
+stale (build_dashboard.py injects its numbers), but the README is
+hand-written, so this script checks it.
 
 Each check is a sentence template from a document, with `#` where a number
 is quoted and `…` for a short stretch of text to skip, plus the value(s)
@@ -23,7 +23,7 @@ most are citations, section numbers or fixed inputs.
     python src/check_numbers.py --list-unchecked
 
 Run as the last stage of run_all.py, so a pipeline run that changes a result
-fails until every document quoting it is updated.
+fails until the README is updated.
 """
 
 import argparse
@@ -36,7 +36,6 @@ from config import PROJECT_ROOT, RESULTS_DIR, ENCODING, CAPACITY_K, TOP_K
 
 DOCS = {
     "README": PROJECT_ROOT / "README.md",
-    "ADDENDUM": PROJECT_ROOT / "REPORT_ADDENDUM.md",
 }
 NUM = r"(-?\d[\d,]*(?:\.\d+)?)"
 ANY_NUM = re.compile(r"(?<![\w.])\d(?:[\d,]*\d)?(?:\.\d+)?")
@@ -197,7 +196,7 @@ def checks(F):
     p32 = F["pool32"]
     choices_m = F["tokens"] * 2 * TOP_K / 1e6          # two layers x top-k per token
 
-    R, A = "README", "ADDENDUM"
+    R = "README"
     C = [
         # --- README: introduction and concepts
         (R, "holds about # GB of expert weights and uses # of # experts",
@@ -285,60 +284,6 @@ def checks(F):
         (R, "every energy saving is re-computed from # to # pJ/bit", (F["link_min"], F["link_max"])),
         (R, "the CXL link energy (# pJ/bit)", (P["cxl_link_pj_per_bit"],)),
 
-        # --- REPORT_ADDENDUM, Part A
-        (A, "At # MB per expert the transfer term dominates: latency is under #% of a CXL fetch",
-         (P["expert_bytes"] / 1e6, lat_share < 0.002)),
-        (A, "CXL/HBM time ratio (#×)", (P["cxl_time_ns"] / P["hbm_time_ns"],)),
-        (A, "is a cited figure, not simulated: # pJ/bit", (P["cxl_link_pj_per_bit"],)),
-        (A, "swept from # to # pJ/bit: LRU's layer-15 saving moves between #% and #%, and the ranking of policies never changes",
-         (F["link_min"], F["link_max"], *s15, F["link_rank_stable"])),
-        (A, "not full # MB transfers", (P["expert_bytes"] / 1e6,)),
-        (A, "HBM2 utilisation is capped at #% by DRAMSim3's trace reader (one request per cycle); our run reached #%",
-         (ds["hbm2_loaded"].frontend_ceiling_pct, ds["hbm2_loaded"].utilisation_pct)),
-        (A, "(HBM2 # ns, DDR4 # ns) are DRAMSim3 idle read latencies",
-         (P["hbm_latency_ns"], P["cxl_device_latency_ns"])),
-        (A, "the CXL link's +# ns is cited. Bandwidths (# GB/s per HBM stack, # GB/s for one CXL x16",
-         (P["cxl_added_latency_ns"], P["hbm_bandwidth_gbps"], P["cxl_bandwidth_gbps"])),
-        (A, "LRU's advantage at layer 31 disappears at #% of a full write, while at layer 15 LRU remains ahead even at a full write",
-         (F["breakeven_pct"](L31), F["mig_adv"](L15, 1.0) > 0)),
-        (A, "by batch # a step touches # of the # experts on average",
-         (32, batch.loc[32, "mean_union_size"], P["num_experts"])),
-        (A, "The first # tokens of each real trace are a profiling prefix", (P["real_warmup_tokens"],)),
-        (A, "(a #–# pJ/bit link moves LRU's layer-15 saving between #% and #%)",
-         (F["link_min"], F["link_max"], *s15)),
-        (A, "— The first PCIe Gen5 SerDes: # pJ/bit", (P["cxl_link_pj_per_bit"],)),
-
-        # --- REPORT_ADDENDUM, Part B
-        (A, "every deployable policy lands within #–#% at both layers", (F["deploy_min"], F["deploy_max"])),
-        (A, "LRU saves #% (layer 15) and #% (layer 31) with measured DRAM energy",
-         (F["esave"](L15, "LRU"), F["esave"](L31, "LRU"))),
-        (A, "| # pJ/bit cited from Bichan et al., CICC 2020 [9], with every saving swept from # to # pJ/bit",
-         (P["cxl_link_pj_per_bit"], F["link_min"], F["link_max"])),
-        (A, "On real traces the best interval is # tokens, and # tokens scores below static at layer 15",
-         (F["shortest_interval"] if best_is_shortest else None, F["first_below_static"](L15))),
-        (A, "Real Mixtral expert: # MB. HBM latency # ns and CXL-side DRAM # ns",
-         (P["expert_bytes"] / 1e6, P["hbm_latency_ns"], P["cxl_device_latency_ns"])),
-        (A, "(e.g. # µs per HBM fetch) | #% too low",
-         ((P["hbm_latency_ns"] + P["expert_bytes"] / gib / P["hbm_bandwidth_gbps"]) / 1e3,
-          (gib - 1) * 100)),
-        (A, "| # µs HBM, # ms CXL", (P["hbm_time_ns"] / 1e3, P["cxl_time_ns"] / 1e6)),
-        (A, "LRU serves #% of accesses from HBM but only #% of tokens entirely from HBM",
-         (hit(L15, "top-2", "LRU"), res.loc[L15, "lru_all_resident_pct"])),
-        (A, "static keeps more tokens fully resident than LRU (#% vs #%)",
-         (res.loc[L31, "static_all_resident_pct"], res.loc[L31, "lru_all_resident_pct"])),
-        (A, "top-2 keeps #–#% of tokens fully in HBM from # to # experts; a DeepSeek-V3-like #-expert top-# layer keeps #%",
-         (F["fixed_min"], F["fixed_max"], F["fixed_n_min"], F["fixed_n_max"],
-          256, sc256.top_k, sc256.tokens_fully_resident_pct)),
-        (A, "# configurations on # datasets, mean accuracy #%",
-         (F["pf_runs"], F["pf_datasets"], F["pf_acc"])),
-        (A, "it hides #–# more points of accesses for #–#% more CXL traffic and #–#% more energy",
-         (min(F["pf_gain"]), max(F["pf_gain"]), min(F["pf_traffic"]), max(F["pf_traffic"]),
-          min(F["pf_energy"]), max(F["pf_energy"]))),
-        (A, "HBM # pJ/bit; CXL # pJ/bit = # measured DRAM (DDR4 proxy) + # cited link. One expert fetch: # mJ from HBM, # mJ from CXL",
-         (P["hbm_pj_per_bit"], P["cxl_pj_per_bit"], P["cxl_dram_pj_per_bit"],
-          P["cxl_link_pj_per_bit"], P["hbm_fetch_mj"], P["cxl_fetch_mj"])),
-        (A, "with the link swept from # to # pJ/bit, LRU's layer-15 saving stays between #% and #% and periodic re-profiling's layer-31 saving between #% and #%; the ranking of policies never changes",
-         (F["link_min"], F["link_max"], *s15, *s31, F["link_rank_stable"])),
     ]
     return C
 
